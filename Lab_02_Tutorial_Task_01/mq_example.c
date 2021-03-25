@@ -22,10 +22,12 @@ void sethandler( void (*f)(int, siginfo_t*, void*), int sigNo) {
 	struct sigaction act;
 	memset(&act, 0, sizeof(struct sigaction));
 	act.sa_sigaction = f;
-	act.sa_flags=SA_SIGINFO;
+	act.sa_flags=SA_SIGINFO; // for receiving  the siginfo_t struct with he signal
 	if (-1==sigaction(sigNo, &act, NULL)) ERR("sigaction");
 }
 
+// handler is not just f(int) but as below since SA_SIGINFO flag is set in sethandler
+// so it will receive siginfo_t struct
 void mq_handler(int sig, siginfo_t *info, void *p) {
 	mqd_t *pin;
 	uint8_t ni;
@@ -62,6 +64,12 @@ void sigchld_handler(int sig, siginfo_t *s, void *p) {
 		children_left--;
 	}
 }
+
+// TEMP_FAILURE_RETRY
+// This macro evaluates expression once, and examines its value as type long int. 
+// If the value equals -1, that indicates a failure and errno should be set to show 
+// what kind of failure. If it fails and reports error code EINTR, TEMP_FAILURE_RETRY
+// evaluates it again, and over and over until the result is not a temporary failure.
 
 void child_work(int n,mqd_t pin, mqd_t pout) {
 	int life;
@@ -117,10 +125,10 @@ int main(int argc, char** argv) {
 	n = atoi(argv[1]);
 	if (n<=0||n>=100)  usage(); 
 
-	mqd_t pin,pout;
-	struct mq_attr attr;
-	attr.mq_maxmsg=10;
-	attr.mq_msgsize=1;
+	mqd_t pin,pout; // descriptors
+	struct mq_attr attr; // attributes
+	attr.mq_maxmsg=10; // capacity
+	attr.mq_msgsize=1; // max msg size in bytes
 	if((pin=TEMP_FAILURE_RETRY(mq_open("/bingo_in", O_RDWR|O_NONBLOCK | O_CREAT, 0600, &attr)))==(mqd_t)-1) ERR("mq open in");
 	if((pout=TEMP_FAILURE_RETRY(mq_open("/bingo_out", O_RDWR | O_CREAT, 0600, &attr)))==(mqd_t)-1) ERR("mq open out");
 
@@ -131,7 +139,7 @@ int main(int argc, char** argv) {
 	static struct sigevent not;
 	not.sigev_notify=SIGEV_SIGNAL;
 	not.sigev_signo=SIGRTMIN;
-	not.sigev_value.sival_ptr=&pin;
+	not.sigev_value.sival_ptr=&pin; // for sending pin to handler in the siginfo_t struct
 	if(mq_notify(pin, &not)<0)ERR("mq_notify");
 
 	parent_work(pout);

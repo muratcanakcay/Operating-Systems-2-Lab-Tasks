@@ -349,3 +349,6 @@ MigrationBackup/
 # Ionide (cross platform F# VS Code tools) working folder
 .ionide/
 Lab_02_Tutorial_Task_01/mq_example
+Practice/hello
+Practice/p.c
+Practice/a.out
