@@ -99,7 +99,7 @@ int main(int argc, char** argv) {
 	int t = strtol(argv[2], NULL, 10);
 	if (t < 100 || t > 2000) usage();
 
-	char q0_name[MAXLENGTH], q_name[MAXLENGTH], message[MAXLENGTH];
+	char q0_name[MAXLENGTH], message[MAXLENGTH];
     char *rMsg;
 	int rVal;
 	pid_t rPid;

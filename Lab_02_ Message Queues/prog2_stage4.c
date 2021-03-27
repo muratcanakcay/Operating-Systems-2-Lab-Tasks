@@ -46,7 +46,7 @@ timespec_t setTimer(int t)
 	
 	spec.tv_nsec += t * 1.0e6;
 	
-	if (spec.tv_nsec > 1.0e9)
+	while(spec.tv_nsec > 1.0e9)
 	{
 		spec.tv_nsec -= 1.0e9;
 		spec.tv_sec++;
@@ -100,6 +100,7 @@ int main(int argc, char** argv) {
 		
 		// wait for message from /q<PID>
 		printf(".");
+		fflush(stdout);
 		if ( (msgLength = TEMP_FAILURE_RETRY(mq_timedreceive(q, message, MAXLENGTH, NULL, &waitTime))) < 1 )
 		{
 			if (errno == ETIMEDOUT) continue;
