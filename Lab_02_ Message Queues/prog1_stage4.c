@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include <sys/types.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -21,14 +22,26 @@
                      perror(source),kill(0,SIGKILL),\
 		     		     exit(EXIT_FAILURE))
 
-void usage(void) // TODO: update for stage 4
-{
-	fprintf(stderr,"USAGE: prog1_stage2 q0_name \n");	
+typedef unsigned int UINT;
+typedef struct timespec timespec_t;
+
+void msleep(UINT milisec) {
+    time_t sec= (int)(milisec/1000);
+    milisec = milisec - (sec*1000);
+    timespec_t req= {0};
+    req.tv_sec = sec;
+    req.tv_nsec = milisec * 1000000L;
+    if(nanosleep(&req,&req)) ERR("nanosleep");
+}
+
+void usage(void) {
+	fprintf(stderr,"USAGE: prog1_stage2 q0_name t\n");
+	fprintf(stderr,"q0_name - name of the message queue\n");
+	fprintf(stderr,"t - sleep interval\n");
 	exit(EXIT_FAILURE);
 }
 
-void sigchld_handler(int sig) 
-{
+void sigchld_handler(int sig) {
 	pid_t pid;	
 
 	for(;;)
@@ -44,17 +57,16 @@ void sigchld_handler(int sig)
 	}
 }
 
-void sethandler( void (*f)(int), int sigNo) 
-{
+void sethandler( void (*f)(int), int sigNo) {
 	struct sigaction act;
 	memset(&act, 0, sizeof(struct sigaction));
 	act.sa_handler = f;
 	if (-1==sigaction(sigNo, &act, NULL)) ERR("sigaction");
 }
 
-void child_work(char* register_pid)
-{
-    char q_name[MAXLENGTH];
+void child_work(pid_t rPid, int t) {
+    
+	char q_name[MAXLENGTH];
 
 	mqd_t q;
 	struct mq_attr attr; 
@@ -62,12 +74,17 @@ void child_work(char* register_pid)
 	attr.mq_msgsize = MAXLENGTH; 
 	
 	// open /q<PID>
-	snprintf(q_name, MAXLENGTH, "/q%s", register_pid);
+	snprintf(q_name, MAXLENGTH, "/q%d", rPid);
 	if( (q = TEMP_FAILURE_RETRY(mq_open(q_name, O_WRONLY | O_CREAT, 0600, &attr))) == (mqd_t)-1) ERR("prog1 child mq_open q");
 	
-	// send "check status" message to prog2
-	if(TEMP_FAILURE_RETRY(mq_send(q, MSG_CHECK_STATUS, strlen(MSG_CHECK_STATUS), 0))) ERR("prog1 child mq_send");
-	printf("Message sent on %s : \"%s\"\n", q_name, MSG_CHECK_STATUS);
+	while(1)
+	{
+		// send "check status" message to prog2
+		if(TEMP_FAILURE_RETRY(mq_send(q, MSG_CHECK_STATUS, strlen(MSG_CHECK_STATUS), 0))) ERR("prog1 child mq_send");
+		printf("Message sent on %s : \"%s\"\n", q_name, MSG_CHECK_STATUS);
+		printf("Sleeping for %dms\n", t);
+		msleep(t);
+	}
 	
 	// close /q<PID>
 	if (mq_close(q) < 0) ERR("prog1 child mq_close");
@@ -75,13 +92,19 @@ void child_work(char* register_pid)
 	exit(EXIT_SUCCESS);
 }
 
-int main(int argc, char** argv) 
-{
-	if(argc!=2) usage();
+int main(int argc, char** argv) {
 
-	char q0_name[MAXLENGTH], q_name[MAXLENGTH], message[MAXLENGTH];;
-    int msgLength;
+	if(argc!=3) usage();
+	int t = strtol(argv[2], NULL, 10);
+	if (t < 100 || t > 2000) usage();
+
+	char q0_name[MAXLENGTH], q_name[MAXLENGTH], message[MAXLENGTH];
+    char *rMsg;
+	int rVal;
+	pid_t rPid;
 	pid_t pid;
+	ssize_t msgLength;
+	
 
 	mqd_t q0; 
 	struct mq_attr attr;
@@ -92,16 +115,25 @@ int main(int argc, char** argv)
 	snprintf(q0_name, MAXLENGTH, "/%s", argv[1]);	
 	if ( (q0 = TEMP_FAILURE_RETRY(mq_open(q0_name, O_RDONLY | O_CREAT, 0600, &attr))) == (mqd_t)-1 ) ERR("prog1 mq_open q0");
 	
-	// receive messages from prog2 and create child processes
+	
 	sethandler(sigchld_handler,SIGCHLD);
     while(1)
 	{
-        if ( (msgLength = TEMP_FAILURE_RETRY(mq_receive(q0, message, MAXLENGTH, NULL))) < 1) ERR("prog1 mq_receive");
+        // receive message from prog2
+		if ( (msgLength = TEMP_FAILURE_RETRY(mq_receive(q0, message, MAXLENGTH, NULL))) < 1) ERR("prog1 mq_receive");
 		message[msgLength]='\0';
         printf("Message received from %s : \"%s\"\n", q0_name, message);
-        
-        if ( (pid=fork()) < 0 ) ERR("fork");
-        if (0 == pid) child_work(message+9); // TODO: must be modified to accept all message types
+
+		// process message
+		rMsg = NULL;
+		if (sscanf(message, "%ms %d %d", &rMsg, &rPid, &rVal) < 2) continue;
+		
+		// register message received
+		if ( strncmp(rMsg, MSG_REGISTER, strlen(MSG_REGISTER)) == 0 )
+        {
+			if ( (pid=fork()) < 0 ) ERR("fork");
+        	if (0 == pid) child_work(rPid, t);
+		}
 	}
 	
 	// close q0
