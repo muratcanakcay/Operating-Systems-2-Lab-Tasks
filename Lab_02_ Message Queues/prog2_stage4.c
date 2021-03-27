@@ -51,6 +51,8 @@ timespec_t setTimer(int t)
 		spec.tv_nsec -= 1.0e9;
 		spec.tv_sec++;
 	}
+
+	return spec;
 }
 
 int main(int argc, char** argv) {
@@ -60,9 +62,8 @@ int main(int argc, char** argv) {
 	if (t < 100 || t > 2000) usage();
 
 	char q0_name[MAXLENGTH], q_name[MAXLENGTH], message[MAXLENGTH];
-	int msgLength, val;
+	int msgLength;
 	pid_t pid = getpid();
-	timespec_t waitTime;
 	srand(time(NULL));
 	
 	mqd_t q0, q; 										
@@ -92,21 +93,21 @@ int main(int argc, char** argv) {
 	while(1)
 	{
 		// randomize value
-		val = rand()%2;
+		int val = rand()%2;
 		
 		// set timer 
-		waitTime = setTimer(t);
+		timespec_t waitTime = setTimer(t);
 		
 		// wait for message from /q<PID>
-		//printf("Waiting for %dms\n", t);
-		if ( (msgLength = TEMP_FAILURE_RETRY(mq_timedreceive(q, message, MAXLENGTH ,NULL, &waitTime))) < 1) 
+		printf(".");
+		if ( (msgLength = TEMP_FAILURE_RETRY(mq_timedreceive(q, message, MAXLENGTH, NULL, &waitTime))) < 1 )
 		{
 			if (errno == ETIMEDOUT) continue;
 			ERR("mq_receive");
 		}
 
 		message[msgLength]='\0';
-		printf("Message received on %s : '%s'\n", q_name, message);
+		printf("\nMessage received on %s : '%s'\n", q_name, message);
 
 		snprintf (message, MAXLENGTH, "%s %d %d", MSG_STATUS, pid, val);
 		if (TEMP_FAILURE_RETRY(mq_send(q0, message, strlen(message), 0))) ERR("mq_send");
