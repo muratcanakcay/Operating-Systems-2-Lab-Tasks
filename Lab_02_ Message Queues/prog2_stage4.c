@@ -14,6 +14,7 @@
 #define MAXCAPACITY 100
 #define MSG_CHECK_STATUS "check status"
 #define MSG_REGISTER "register"
+#define MSG_STATUS "status"
 
 #define ERR(source) (fprintf(stderr,"%s:%d\n",__FILE__,__LINE__),\
                      perror(source),kill(0,SIGKILL),\
@@ -38,6 +39,20 @@ void usage(void) {
 	exit(EXIT_FAILURE);
 }
 
+timespec_t setTimer(int t)
+{
+	timespec_t spec;
+	clock_gettime(CLOCK_REALTIME, &spec);
+	
+	spec.tv_nsec += t * 1.0e6;
+	
+	if (spec.tv_nsec > 1.0e9)
+	{
+		spec.tv_nsec -= 1.0e9;
+		spec.tv_sec++;
+	}
+}
+
 int main(int argc, char** argv) {
 
 	if(argc!=3) usage();
@@ -45,8 +60,10 @@ int main(int argc, char** argv) {
 	if (t < 100 || t > 2000) usage();
 
 	char q0_name[MAXLENGTH], q_name[MAXLENGTH], message[MAXLENGTH];
-	int msgLength;
+	int msgLength, val;
 	pid_t pid = getpid();
+	timespec_t waitTime;
+	srand(time(NULL));
 	
 	mqd_t q0, q; 										
 	struct mq_attr attrq0, attrq; 						
@@ -63,6 +80,7 @@ int main(int argc, char** argv) {
     
 	// send register message to prog1
 	snprintf (message, MAXLENGTH, "%s %d", MSG_REGISTER, pid);
+	
 	if (TEMP_FAILURE_RETRY(mq_send(q0, message, strlen(message), 0))) ERR("mq_send");
 	printf("Message sent on %s : '%s'\n", q0_name, message);
 
@@ -73,10 +91,26 @@ int main(int argc, char** argv) {
 
 	while(1)
 	{
-		// receive message from /q<PID>
-		if ( (msgLength = TEMP_FAILURE_RETRY(mq_receive(q, message, MAXLENGTH ,NULL))) < 1) ERR("mq_receive");
+		// randomize value
+		val = rand()%2;
+		
+		// set timer 
+		waitTime = setTimer(t);
+		
+		// wait for message from /q<PID>
+		//printf("Waiting for %dms\n", t);
+		if ( (msgLength = TEMP_FAILURE_RETRY(mq_timedreceive(q, message, MAXLENGTH ,NULL, &waitTime))) < 1) 
+		{
+			if (errno == ETIMEDOUT) continue;
+			ERR("mq_receive");
+		}
+
 		message[msgLength]='\0';
 		printf("Message received on %s : '%s'\n", q_name, message);
+
+		snprintf (message, MAXLENGTH, "%s %d %d", MSG_STATUS, pid, val);
+		if (TEMP_FAILURE_RETRY(mq_send(q0, message, strlen(message), 0))) ERR("mq_send");
+		printf("Message sent on %s : '%s'\n", q0_name, message);
 	}
 
     // close q0 and /q<PID>

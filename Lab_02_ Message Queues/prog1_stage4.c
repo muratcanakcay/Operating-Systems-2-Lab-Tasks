@@ -16,6 +16,7 @@
 #define MAXCAPACITY 10
 #define MSG_CHECK_STATUS "check status"
 #define MSG_REGISTER "register"
+#define MSG_STATUS "status"
 
 
 #define ERR(source) (fprintf(stderr,"%s:%d\n",__FILE__,__LINE__),\
@@ -122,17 +123,23 @@ int main(int argc, char** argv) {
         // receive message from prog2
 		if ( (msgLength = TEMP_FAILURE_RETRY(mq_receive(q0, message, MAXLENGTH, NULL))) < 1) ERR("prog1 mq_receive");
 		message[msgLength]='\0';
-        printf("Message received from %s : \"%s\"\n", q0_name, message);
 
 		// process message
 		rMsg = NULL;
 		if (sscanf(message, "%ms %d %d", &rMsg, &rPid, &rVal) < 2) continue;
 		
-		// register message received
+		// register message received -- HOW MUCH ERROR CHECKING REQUIRED FOR MSG?
 		if ( strncmp(rMsg, MSG_REGISTER, strlen(MSG_REGISTER)) == 0 )
         {
+			printf("Register message received : %d\n", rPid);
 			if ( (pid=fork()) < 0 ) ERR("fork");
         	if (0 == pid) child_work(rPid, t);
+		}
+
+		// status message received -- HOW MUCH ERROR CHECKING REQUIRED FOR MSG?
+		if ( strncmp(rMsg, MSG_STATUS, strlen(MSG_STATUS)) == 0 )
+        {
+			printf("Status message received from %d : %d\n", rPid, rVal);
 		}
 	}
 	
