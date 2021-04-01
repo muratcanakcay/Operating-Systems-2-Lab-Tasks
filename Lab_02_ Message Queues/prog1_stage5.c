@@ -47,7 +47,7 @@ void sigchld_handler(int sig) {
 	for(;;)
     {
 		pid=waitpid(0, NULL, WNOHANG);
-		if(pid > 0 && DEBUG) puts("[DEBUG] Prog1 child terminated");
+		if(pid > 0 && DEBUG) puts("[DEBUG] Prog1 child process terminated in handler");
         if(pid == 0) return;
 		if(pid <= 0) 
         {
@@ -81,7 +81,7 @@ void child_work(pid_t rPid, int t) {
 	{
 		// send "check status" message to prog2
 		if(TEMP_FAILURE_RETRY(mq_send(q, MSG_CHECK_STATUS, strlen(MSG_CHECK_STATUS), 0))) ERR("prog1 child mq_send");
-		printf("Message sent on %s : \"%s\"\n", q_name, MSG_CHECK_STATUS);
+		printf("\nMessage sent on %s : \"%s\"\n", q_name, MSG_CHECK_STATUS);
 		printf("Sleeping for %dms\n", t);
 		msleep(t);
 	}
@@ -129,7 +129,7 @@ int main(int argc, char** argv) {
 		// register message received -- HOW MUCH ERROR CHECKING REQUIRED FOR MSG?
 		if ( strncmp(rMsg, MSG_REGISTER, strlen(MSG_REGISTER)) == 0 )
         {
-			printf("Register message received : %d\n", rPid);
+			printf("\n-----Register message received : %d\n", rPid);
 			if ( (pid=fork()) < 0 ) ERR("fork");
         	if (0 == pid) child_work(rPid, t);
 		}
@@ -137,7 +137,7 @@ int main(int argc, char** argv) {
 		// status message received -- HOW MUCH ERROR CHECKING REQUIRED FOR MSG?
 		if ( strncmp(rMsg, MSG_STATUS, strlen(MSG_STATUS)) == 0 )
         {
-			printf("Status message received from %d : %d\n", rPid, rVal);
+			printf("Message received from /q%d : %d\n", rPid, rVal);
 		}
 
         free(rMsg);
@@ -145,9 +145,9 @@ int main(int argc, char** argv) {
 	
 	// close q0
 	if (mq_close(q0) < 0) ERR("prog1 mq_close");
-	//if (mq_unlink(q_name) < 0) ERR("mq unlink");
+	//if (mq_unlink(q0_name) < 0) ERR("mq unlink");
 
-	while(wait(NULL)>0) if (DEBUG) printf("[DEBUG] Prog 1 child terminated.\n");
+	while(wait(NULL)>0) if (DEBUG) printf("[DEBUG] Prog1 child process terminated in wait\n");
 	
 	return EXIT_SUCCESS;
 }
