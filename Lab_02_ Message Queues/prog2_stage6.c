@@ -1,5 +1,5 @@
-#include <asm-generic/errno-base.h>
 #define _GNU_SOURCE
+#include <pthread.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,7 +10,6 @@
 #include <string.h>
 #include <time.h>
 #include <mqueue.h>
-#include <pthread.h>
 
 #define DEBUG 0
 #define MAXLENGTH 100
@@ -58,7 +57,7 @@ void setHandler( void (*f)(int), int sigNo) {
 void sigHandler(int sig) 
 {
 	lastSignal = sig;
-    printf("Signal received: %d\n", sig);
+    if (DEBUG) printf("Signal received: %d\n", sig);
 }
 
 timespec_t setTimer(int t) 
@@ -80,6 +79,8 @@ timespec_t setTimer(int t)
 // randomizes the value every t ms
 void* randomizer(void* randArgs) 
 {
+    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+    
     randArgs_t* args = (randArgs_t*)randArgs;
     
     while(1)
@@ -109,7 +110,7 @@ int main(int argc, char** argv)
     randArgs.randVal = 0;
     randArgs.t = t;
 	
-    // setHandler(sigHandler, SIGINT);
+    setHandler(sigHandler, SIGINT);
 
 	// open q0 
 	snprintf(q0_name, MAXLENGTH, "/%s", argv[1]);
@@ -129,38 +130,56 @@ int main(int argc, char** argv)
     if ( (q = TEMP_FAILURE_RETRY(mq_open(q_name, O_RDONLY, 0600, &attrq))) == (mqd_t)-1 ) ERR("mq_open q");
     printf("%d: opened message queue with name: '%s'\n", getpid(), q_name);
 
-    // TODO: join the thread when exiting!!! (stage 6)
-    if (pthread_create(&randArgs.tid, NULL, randomizer, &randArgs)) ERR("Couldn't create thread");
+    // start randomizer thread
+    if (pthread_create(&randArgs.tid, NULL, randomizer, &randArgs)) ERR("Couldn't create randomizer thread");
 
     //
-    /* Start receiving check status messages and responding to them */
+    /* Start receiving check status messages and responding to them until SIGINT */
     //
 
     while(1)
 	{
-		// set timer
+		printf(".");
+		fflush(stdout);
+        
+        // set timer
 		timespec_t waitTime = setTimer(t);
 		
 		// wait for message from /q<PID>
-		printf(".");
-		fflush(stdout);
-		if ( (msgLength = TEMP_FAILURE_RETRY(mq_timedreceive(q, message, MAXLENGTH, NULL, &waitTime))) < 1 )
-		{
-			if (errno == ETIMEDOUT) continue;
-			ERR("mq_receive");
-		}
+		while (1)
+        {
+            errno = 0;
+            if ( (msgLength = mq_timedreceive(q, message, MAXLENGTH, NULL, &waitTime)) < 1 )
+            {
+                if (errno == ETIMEDOUT || (lastSignal == SIGINT)) break;
+                else if (errno == EINTR) continue;
+                else ERR("mq_receive");
+            }
+            else break;
+        }        
+        if (lastSignal == SIGINT) break;
+        if (errno == ETIMEDOUT) continue;
 
 		message[msgLength]='\0';
 		printf("\nMessage received on %s : '%s'\n", q_name, message);
 
-		snprintf (message, MAXLENGTH, "%s %d %d", MSG_STATUS, getpid(), randArgs.randVal);
+		// send response
+        snprintf (message, MAXLENGTH, "%s %d %d", MSG_STATUS, getpid(), randArgs.randVal);
 		if (TEMP_FAILURE_RETRY(mq_send(q0, message, strlen(message), 1))) ERR("mq_send");
 		printf("Message sent on %s : '%s'\n", q0_name, message);
 	}
 
+    puts("\nSIGINT received, exiting...");
+
+    // terminate randomizer thread
+    pthread_cancel(randArgs.tid);
+    if (pthread_join(randArgs.tid, NULL)) ERR("pthread_join");
+    puts("Randomizer thread terminated.");
+
     // close q0 and /q<PID> (for stage 6)
     if (mq_close(q0)) ERR("mq_close");
 	if (mq_close(q)) ERR("mq_close");
+    puts("Queues closed.");
 	
 	return EXIT_SUCCESS;
 }
