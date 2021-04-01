@@ -47,7 +47,7 @@ void sigchld_handler(int sig) {
 	for(;;)
     {
 		pid=waitpid(0, NULL, WNOHANG);
-		if(pid > 0 && DEBUG) puts("[DEBUG] Prog1 child terminated");
+		if(pid > 0 && DEBUG) puts("[DEBUG] Prog1 child terminated\n");
         if(pid == 0) return;
 		if(pid <= 0) 
         {

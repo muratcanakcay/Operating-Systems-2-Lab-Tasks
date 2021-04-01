@@ -92,9 +92,6 @@ int main(int argc, char** argv) {
 
 	while(1)
 	{
-		// randomize value
-		int val = rand()%2;
-		
 		// set timer 
 		timespec_t waitTime = setTimer(t);
 		
@@ -106,6 +103,9 @@ int main(int argc, char** argv) {
 			if (errno == ETIMEDOUT) continue;
 			ERR("mq_receive");
 		}
+
+		// randomize value
+		int val = rand()%2;
 
 		message[msgLength]='\0';
 		printf("\nMessage received on %s : '%s'\n", q_name, message);
