@@ -10,7 +10,6 @@
 #include <time.h>
 #include <mqueue.h>
 
-#define HERE puts("**************HERE***************");
 #define DEBUG 0
 #define MAXLENGTH 100
 #define MAXCAPACITY 10
@@ -105,7 +104,6 @@ int main(int argc, char** argv) {
 	pid_t rPid;
 	pid_t pid;
 	ssize_t msgLength;
-	
 
 	mqd_t q0; 
 	struct mq_attr attr;
@@ -113,9 +111,8 @@ int main(int argc, char** argv) {
 	attr.mq_msgsize = MAXLENGTH; 
 
 	// open q0
-	snprintf(q0_name, MAXLENGTH, "/%s", argv[1]);	
+	snprintf(q0_name, MAXLENGTH, "/%s", argv[1]);
 	if ( (q0 = TEMP_FAILURE_RETRY(mq_open(q0_name, O_RDONLY | O_CREAT, 0600, &attr))) == (mqd_t)-1 ) ERR("prog1 mq_open q0");
-	
 	
 	sethandler(sigchld_handler,SIGCHLD);
     while(1)
@@ -126,7 +123,7 @@ int main(int argc, char** argv) {
 
 		// process message
 		rMsg = NULL;
-		if (sscanf(message, "%ms %d %d", &rMsg, &rPid, &rVal) < 2) continue;
+		if (sscanf(message, "%ms %d %d", &rMsg, &rPid, &rVal) < 2) continue; // should I check for ENOMEM?
 		
 		// register message received -- HOW MUCH ERROR CHECKING REQUIRED FOR MSG?
 		if ( strncmp(rMsg, MSG_REGISTER, strlen(MSG_REGISTER)) == 0 )
