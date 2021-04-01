@@ -115,6 +115,7 @@ int main(int argc, char** argv) {
 	if ( (q0 = TEMP_FAILURE_RETRY(mq_open(q0_name, O_RDONLY | O_CREAT, 0600, &attr))) == (mqd_t)-1 ) ERR("prog1 mq_open q0");
 	
 	sethandler(sigchld_handler,SIGCHLD);
+    
     while(1)
 	{
         // receive message from prog2
@@ -122,7 +123,7 @@ int main(int argc, char** argv) {
 		message[msgLength]='\0';
 
 		// process message
-		rMsg = NULL;
+		rMsg = NULL;  // TODO: free() rMsg if it's not NULL before exiting program (stage6)
 		if (sscanf(message, "%ms %d %d", &rMsg, &rPid, &rVal) < 2) continue; // should I check for ENOMEM?
 		
 		// register message received -- HOW MUCH ERROR CHECKING REQUIRED FOR MSG?
@@ -138,6 +139,8 @@ int main(int argc, char** argv) {
         {
 			printf("Status message received from %d : %d\n", rPid, rVal);
 		}
+
+        free(rMsg);
 	}
 	
 	// close q0

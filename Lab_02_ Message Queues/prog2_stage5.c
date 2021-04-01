@@ -64,7 +64,8 @@ void sig_handler(int sig, siginfo_t *info, void *p)
     printf("signal received %d\n", sig);
 }
 
-/* not used in stage 5 & 6
+/* ____not used in stage 5 & 6_____
+
 timespec_t setTimer(int t) 
 {
 	timespec_t spec;
@@ -77,10 +78,41 @@ timespec_t setTimer(int t)
 		spec.tv_nsec -= 1.0e9;
 		spec.tv_sec++;
 	}
+
+	return spec;
+}
 */
 
-// 	return spec;
-// }
+void setNotification(mqd_t q, int sig)
+{
+    static struct sigevent not;
+	not.sigev_notify = SIGEV_SIGNAL;
+	not.sigev_signo = sig;
+	not.sigev_value.sival_ptr = NULL;
+	if (mq_notify(q, &not) < 0) ERR("mq_notify");
+}
+
+void processMessages(mqd_t q0, char* q0_name, mqd_t q, char* q_name, int val)
+{
+    char message[MAXLENGTH];
+    int msgLength = 0;
+    
+    while(1)
+    {
+        if ( (msgLength = (mq_receive(q, message, MAXLENGTH, NULL))) < 1 )
+        {
+            if (errno == EAGAIN) return;
+            ERR("mq_receive");
+        }
+
+        message[msgLength]='\0';
+        printf("\nMessage received on %s : '%s'\n", q_name, message);
+
+        snprintf (message, MAXLENGTH, "%s %d %d", MSG_STATUS, getpid(), val);
+        if (TEMP_FAILURE_RETRY(mq_send(q0, message, strlen(message), 0))) ERR("mq_send");
+        printf("Message sent on %s : '%s'\n", q0_name, message);
+    }
+}
 
 int main(int argc, char** argv) {
 
@@ -89,8 +121,6 @@ int main(int argc, char** argv) {
 	if (t < 100 || t > 2000) usage();
 
 	char q0_name[MAXLENGTH], q_name[MAXLENGTH], message[MAXLENGTH];
-	int msgLength;
-	pid_t pid = getpid();
 	srand(time(NULL));
 	
 	mqd_t q0, q; 										
@@ -107,49 +137,36 @@ int main(int argc, char** argv) {
 	}
     
 	// send register message to prog1
-	snprintf (message, MAXLENGTH, "%s %d", MSG_REGISTER, pid);
-	
+	snprintf (message, MAXLENGTH, "%s %d", MSG_REGISTER, getpid());
 	if (TEMP_FAILURE_RETRY(mq_send(q0, message, strlen(message), 0))) ERR("mq_send");
 	printf("Message sent on %s : '%s'\n", q0_name, message);
 
     // open /q<PID>
-	snprintf (q_name, MAXLENGTH, "/q%d", pid);
+	snprintf (q_name, MAXLENGTH, "/q%d", getpid());
     if ( (q = TEMP_FAILURE_RETRY(mq_open(q_name, O_RDONLY | O_NONBLOCK, 0600, &attrq))) == (mqd_t)-1 ) ERR("mq_open q");
     if (DEBUG) printf("[DEBUG] Prog2 with pid %d: opened message queue with name: '%s'\n", getpid(), q_name);
 
-	printf(".");
+	sethandler(sig_handler, SIGRTMIN);
+
+    //
+    /* Start receiving check status messages and responding to them */
+    //
+    
+    printf(".");
     fflush(stdout);
 
     // set initial notification
-    sethandler(sig_handler, SIGRTMIN);
-    static struct sigevent not;
-	not.sigev_notify=SIGEV_SIGNAL;
-	not.sigev_signo=SIGRTMIN;
-	not.sigev_value.sival_ptr = NULL;
-	if (mq_notify(q, &not) < 0) ERR("mq_notify");
+    setNotification(q, SIGRTMIN);
 
     int val = rand()%2;
-    // receive message(s) from /q<PID>
-            while(1)
-            {
-                if ( (msgLength = (mq_receive(q, message, MAXLENGTH, NULL))) < 1 )
-                {
-                    if (errno == EAGAIN) break;
-                    ERR("mq_receive");
-                }
 
-                message[msgLength]='\0';
-                printf("\nMessage received on %s : '%s'\n", q_name, message);
+    // receive any message(s) from /q<PID> already waiting in queue
+    // and send response to q0
+    processMessages(q0, q0_name, q, q_name, val);
 
-                snprintf (message, MAXLENGTH, "%s %d %d", MSG_STATUS, pid, val);
-                if (TEMP_FAILURE_RETRY(mq_send(q0, message, strlen(message), 0))) ERR("mq_send");
-                printf("Message sent on %s : '%s'\n", q0_name, message);
-            }
-
+    // enter sleep-randomize-receive loop
     while(1)
 	{
-		// randomize value
-		val = rand()%2;
 		printf(".");
 		fflush(stdout);
         
@@ -161,28 +178,14 @@ int main(int argc, char** argv) {
         {
             // re-set notification
             lastSignal = 0;
-            static struct sigevent not;
-	        not.sigev_notify=SIGEV_SIGNAL;
-            not.sigev_signo=SIGRTMIN;
-            not.sigev_value.sival_ptr = NULL;
-            if (mq_notify(q, &not)<0) ERR("mq_notify");
+            setNotification(q, SIGRTMIN);
 
-		    // receive message(s) from /q<PID>
-            while(1)
-            {
-                if ( (msgLength = TEMP_FAILURE_RETRY(mq_receive(q, message, MAXLENGTH, NULL))) < 1 )
-                {
-                    if (errno == EAGAIN) break;
-                    ERR("mq_receive");
-                }
-
-                message[msgLength]='\0';
-                printf("\nMessage received on %s : '%s'\n", q_name, message);
-
-                snprintf (message, MAXLENGTH, "%s %d %d", MSG_STATUS, pid, val);
-                if (TEMP_FAILURE_RETRY(mq_send(q0, message, strlen(message), 0))) ERR("mq_send");
-                printf("Message sent on %s : '%s'\n", q0_name, message);
-            }
+		    // randomize value
+		    val = rand()%2;
+            
+            // receive any message(s) from /q<PID> already waiting in queue
+            // and send response to q0
+            processMessages(q0, q0_name, q, q_name, val);
         }    
 	}
 
