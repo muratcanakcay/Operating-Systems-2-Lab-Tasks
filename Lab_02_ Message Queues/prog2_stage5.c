@@ -9,7 +9,7 @@
 #include <time.h>
 #include <mqueue.h>
 
-#define DEBUG 0
+#define DEBUG 1
 #define MAXLENGTH 100
 #define MAXCAPACITY 100
 #define MSG_CHECK_STATUS "check status"
@@ -20,6 +20,7 @@
                      perror(source),kill(0,SIGKILL),\
 		     		     exit(EXIT_FAILURE))
 
+volatile sig_atomic_t lastSignal = 0;
 typedef unsigned int UINT;
 typedef struct timespec timespec_t;
 
@@ -39,7 +40,23 @@ void usage(void) {
 	exit(EXIT_FAILURE);
 }
 
-timespec_t setTimer(int t)
+void sethandler( void (*f)(int, siginfo_t*, void*), int sigNo) {
+	struct sigaction act;
+	memset(&act, 0, sizeof(struct sigaction));
+	act.sa_sigaction = f;
+	act.sa_flags=SA_SIGINFO; // for receiving the siginfo_t struct with he signal
+	if (-1==sigaction(sigNo, &act, NULL)) ERR("sigaction");
+}
+
+void sig_handler(int sig, siginfo_t *info, void *p) 
+{
+	lastSignal = sig;
+    printf("signal received %d", sig);
+    if(kill(getpid(), SIGUSR1)) ERR("kill");
+}
+
+/* not used in stage 5 & 6
+timespec_t setTimer(int t) 
 {
 	timespec_t spec;
 	clock_gettime(CLOCK_REALTIME, &spec);
@@ -51,9 +68,10 @@ timespec_t setTimer(int t)
 		spec.tv_nsec -= 1.0e9;
 		spec.tv_sec++;
 	}
+*/
 
-	return spec;
-}
+// 	return spec;
+// }
 
 int main(int argc, char** argv) {
 
@@ -90,29 +108,55 @@ int main(int argc, char** argv) {
     if ( (q = TEMP_FAILURE_RETRY(mq_open(q_name, O_RDONLY, 0600, &attrq))) == (mqd_t)-1 ) ERR("mq_open q");
     if (DEBUG) printf("[DEBUG] Prog2 with pid %d: opened message queue with name: '%s'\n", getpid(), q_name);
 
-	while(1)
+	printf(".");
+    fflush(stdout);
+
+    // set initial notification
+    sethandler(sig_handler, SIGRTMIN);
+    static struct sigevent not;
+	not.sigev_notify=SIGEV_SIGNAL;
+	not.sigev_signo=SIGRTMIN;
+	not.sigev_value.sival_ptr = NULL;
+	if (mq_notify(q, &not) < 0) ERR("mq_notify");
+
+    while(1)
 	{
-		// randomize value
+		// sleep - wake up at notification or timeout
+        msleep(t);
+        
+        // randomize value
 		int val = rand()%2;
-		
-		// set timer 
-		timespec_t waitTime = setTimer(t);
-		
-		// wait for message from /q<PID>
 		printf(".");
 		fflush(stdout);
-		if ( (msgLength = TEMP_FAILURE_RETRY(mq_timedreceive(q, message, MAXLENGTH, NULL, &waitTime))) < 1 )
-		{
-			if (errno == ETIMEDOUT) continue;
-			ERR("mq_receive");
-		}
 
-		message[msgLength]='\0';
-		printf("\nMessage received on %s : '%s'\n", q_name, message);
+        // if notification triggered
+        while (lastSignal == SIGRTMIN)
+        {
+            // re-set notification
+            lastSignal = 0;
+            static struct sigevent not;
+	        not.sigev_notify=SIGEV_SIGNAL;
+            not.sigev_signo=SIGRTMIN;
+            not.sigev_value.sival_ptr = NULL;
+            if (mq_notify(q, &not)<0) ERR("mq_notify");
 
-		snprintf (message, MAXLENGTH, "%s %d %d", MSG_STATUS, pid, val);
-		if (TEMP_FAILURE_RETRY(mq_send(q0, message, strlen(message), 0))) ERR("mq_send");
-		printf("Message sent on %s : '%s'\n", q0_name, message);
+		    // receive message(s) from /q<PID>
+            while(1)
+            {
+                if ( (msgLength = TEMP_FAILURE_RETRY(mq_receive(q, message, MAXLENGTH, NULL))) < 1 )
+                {
+                    if (errno == EAGAIN) break;
+                    ERR("mq_receive");
+                }
+
+                message[msgLength]='\0';
+                printf("\nMessage received on %s : '%s'\n", q_name, message);
+
+                snprintf (message, MAXLENGTH, "%s %d %d", MSG_STATUS, pid, val);
+                if (TEMP_FAILURE_RETRY(mq_send(q0, message, strlen(message), 0))) ERR("mq_send");
+                printf("Message sent on %s : '%s'\n", q0_name, message);
+            }
+        }    
 	}
 
     // close q0 and /q<PID>
