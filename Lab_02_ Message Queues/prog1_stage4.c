@@ -115,7 +115,8 @@ int main(int argc, char** argv) {
 	if ( (q0 = TEMP_FAILURE_RETRY(mq_open(q0_name, O_RDONLY | O_CREAT, 0600, &attr))) == (mqd_t)-1 ) ERR("prog1 mq_open q0");
 	
 	sethandler(sigchld_handler,SIGCHLD);
-    while(1)
+    
+	while(1)
 	{
         // receive message from prog2
 		if ( (msgLength = TEMP_FAILURE_RETRY(mq_receive(q0, message, MAXLENGTH, NULL))) < 1) ERR("prog1 mq_receive");
@@ -138,6 +139,8 @@ int main(int argc, char** argv) {
         {
 			printf("Status message received from %d : %d\n", rPid, rVal);
 		}
+		
+		free(rMsg);
 	}
 	
 	// close q0
