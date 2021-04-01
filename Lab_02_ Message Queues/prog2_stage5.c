@@ -12,7 +12,7 @@
 #include <mqueue.h>
 #include <pthread.h>
 
-#define DEBUG 1
+#define DEBUG 0
 #define MAXLENGTH 100
 #define MAXCAPACITY 100
 #define MSG_CHECK_STATUS "check status"
@@ -154,7 +154,7 @@ int main(int argc, char** argv)
 		printf("\nMessage received on %s : '%s'\n", q_name, message);
 
 		snprintf (message, MAXLENGTH, "%s %d %d", MSG_STATUS, getpid(), randArgs.randVal);
-		if (TEMP_FAILURE_RETRY(mq_send(q0, message, strlen(message), 0))) ERR("mq_send");
+		if (TEMP_FAILURE_RETRY(mq_send(q0, message, strlen(message), 1))) ERR("mq_send");
 		printf("Message sent on %s : '%s'\n", q0_name, message);
 	}
 

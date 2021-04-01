@@ -99,16 +99,17 @@ int main(int argc, char** argv) {
 	if (t < 100 || t > 2000) usage();
 
 	char q0_name[MAXLENGTH], message[MAXLENGTH];
-    char *rMsg;
+    char* rMsg;
+    unsigned rPrio;
 	int rVal;
 	pid_t rPid;
 	pid_t pid;
 	ssize_t msgLength;
 
-	mqd_t q0; 
+	mqd_t q0;
 	struct mq_attr attr;
-	attr.mq_maxmsg = MAXCAPACITY; 
-	attr.mq_msgsize = MAXLENGTH; 
+	attr.mq_maxmsg = MAXCAPACITY;
+	attr.mq_msgsize = MAXLENGTH;
 
 	// open q0
 	snprintf(q0_name, MAXLENGTH, "/%s", argv[1]);
@@ -119,7 +120,7 @@ int main(int argc, char** argv) {
     while(1)
 	{
         // receive message from prog2
-		if ( (msgLength = TEMP_FAILURE_RETRY(mq_receive(q0, message, MAXLENGTH, NULL))) < 1) ERR("prog1 mq_receive");
+		if ( (msgLength = TEMP_FAILURE_RETRY(mq_receive(q0, message, MAXLENGTH, &rPrio))) < 1) ERR("prog1 mq_receive");
 		message[msgLength]='\0';
 
 		// process message
@@ -127,7 +128,7 @@ int main(int argc, char** argv) {
 		if (sscanf(message, "%ms %d %d", &rMsg, &rPid, &rVal) < 2) continue; // should I check for ENOMEM?
 		
 		// register message received -- HOW MUCH ERROR CHECKING REQUIRED FOR MSG?
-		if ( strncmp(rMsg, MSG_REGISTER, strlen(MSG_REGISTER)) == 0 )
+        if (rPrio == 0)
         {
 			printf("\n-----Register message received : %d\n", rPid);
 			if ( (pid=fork()) < 0 ) ERR("fork");
@@ -135,7 +136,7 @@ int main(int argc, char** argv) {
 		}
 
 		// status message received -- HOW MUCH ERROR CHECKING REQUIRED FOR MSG?
-		if ( strncmp(rMsg, MSG_STATUS, strlen(MSG_STATUS)) == 0 )
+		if (rPrio == 1)
         {
 			printf("Message received from /q%d : %d\n", rPid, rVal);
 		}
