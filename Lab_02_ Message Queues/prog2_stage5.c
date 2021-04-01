@@ -1,4 +1,6 @@
+#include <asm-generic/errno-base.h>
 #define _GNU_SOURCE
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -30,7 +32,15 @@ void msleep(UINT milisec) {
     timespec_t req= {0};
     req.tv_sec = sec;
     req.tv_nsec = milisec * 1000000L;
-    if(nanosleep(&req,&req)) ERR("nanosleep");
+    if(nanosleep(&req,&req))
+    { 
+        if (errno == EINTR && lastSignal == SIGRTMIN) 
+        {
+            printf("nanosleep interrupted by SIGRTMN\n");
+            return;
+        }
+        ERR("nanosleep");
+    }
 }
 
 void usage(void) {
@@ -51,8 +61,7 @@ void sethandler( void (*f)(int, siginfo_t*, void*), int sigNo) {
 void sig_handler(int sig, siginfo_t *info, void *p) 
 {
 	lastSignal = sig;
-    printf("signal received %d", sig);
-    if(kill(getpid(), SIGUSR1)) ERR("kill");
+    printf("signal received %d\n", sig);
 }
 
 /* not used in stage 5 & 6
@@ -105,7 +114,7 @@ int main(int argc, char** argv) {
 
     // open /q<PID>
 	snprintf (q_name, MAXLENGTH, "/q%d", pid);
-    if ( (q = TEMP_FAILURE_RETRY(mq_open(q_name, O_RDONLY, 0600, &attrq))) == (mqd_t)-1 ) ERR("mq_open q");
+    if ( (q = TEMP_FAILURE_RETRY(mq_open(q_name, O_RDONLY | O_NONBLOCK, 0600, &attrq))) == (mqd_t)-1 ) ERR("mq_open q");
     if (DEBUG) printf("[DEBUG] Prog2 with pid %d: opened message queue with name: '%s'\n", getpid(), q_name);
 
 	printf(".");
@@ -119,15 +128,33 @@ int main(int argc, char** argv) {
 	not.sigev_value.sival_ptr = NULL;
 	if (mq_notify(q, &not) < 0) ERR("mq_notify");
 
+    int val = rand()%2;
+    // receive message(s) from /q<PID>
+            while(1)
+            {
+                if ( (msgLength = (mq_receive(q, message, MAXLENGTH, NULL))) < 1 )
+                {
+                    if (errno == EAGAIN) break;
+                    ERR("mq_receive");
+                }
+
+                message[msgLength]='\0';
+                printf("\nMessage received on %s : '%s'\n", q_name, message);
+
+                snprintf (message, MAXLENGTH, "%s %d %d", MSG_STATUS, pid, val);
+                if (TEMP_FAILURE_RETRY(mq_send(q0, message, strlen(message), 0))) ERR("mq_send");
+                printf("Message sent on %s : '%s'\n", q0_name, message);
+            }
+
     while(1)
 	{
-		// sleep - wake up at notification or timeout
-        msleep(t);
-        
-        // randomize value
-		int val = rand()%2;
+		// randomize value
+		val = rand()%2;
 		printf(".");
 		fflush(stdout);
+        
+        // sleep - wake up at notification or timeout
+        msleep(t);
 
         // if notification triggered
         while (lastSignal == SIGRTMIN)
