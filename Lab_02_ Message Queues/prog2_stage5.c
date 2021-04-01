@@ -12,7 +12,7 @@
 #include <mqueue.h>
 #include <pthread.h>
 
-#define DEBUG 0
+#define DEBUG 1
 #define MAXLENGTH 100
 #define MAXCAPACITY 100
 #define MSG_CHECK_STATUS "check status"
