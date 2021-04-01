@@ -10,6 +10,7 @@
 #include <string.h>
 #include <time.h>
 #include <mqueue.h>
+#include <pthread.h>
 
 #define DEBUG 1
 #define MAXLENGTH 100
@@ -25,6 +26,11 @@
 volatile sig_atomic_t lastSignal = 0;
 typedef unsigned int UINT;
 typedef struct timespec timespec_t;
+typedef struct {
+	pthread_t tid;
+	int randVal;
+    int t;
+} randArgs_t;
 
 void msleep(UINT milisec) {
     time_t sec= (int)(milisec/1000);
@@ -92,7 +98,8 @@ void setNotification(mqd_t q, int sig)
 	if (mq_notify(q, &not) < 0) ERR("mq_notify");
 }
 
-void processMessages(mqd_t q0, char* q0_name, mqd_t q, char* q_name, int val)
+// reads "check status" messages and responds to them
+void processMessages(mqd_t q0, char* q0_name, mqd_t q, char* q_name, randArgs_t* randArgs)
 {
     char message[MAXLENGTH];
     int msgLength = 0;
@@ -108,21 +115,36 @@ void processMessages(mqd_t q0, char* q0_name, mqd_t q, char* q_name, int val)
         message[msgLength]='\0';
         printf("\nMessage received on %s : '%s'\n", q_name, message);
 
-        snprintf (message, MAXLENGTH, "%s %d %d", MSG_STATUS, getpid(), val);
+        snprintf (message, MAXLENGTH, "%s %d %d", MSG_STATUS, getpid(), randArgs->randVal);
         if (TEMP_FAILURE_RETRY(mq_send(q0, message, strlen(message), 0))) ERR("mq_send");
         printf("Message sent on %s : '%s'\n", q0_name, message);
     }
 }
 
+// randomizes the value every t ms
+void* randomizer(void* randArgs) 
+{
+    randArgs_t* args = (randArgs_t*)randArgs;
+    
+    while(1)
+    {
+        msleep(args->t);
+        args->randVal = rand() % 2;
+    }
+}
+
+
 int main(int argc, char** argv) {
 
-	if(argc!=3) usage();
+	
+    // cmd line arguments
+    if(argc!=3) usage();
 	int t = strtol(argv[2], NULL, 10);
 	if (t < 100 || t > 2000) usage();
 
-	char q0_name[MAXLENGTH], q_name[MAXLENGTH], message[MAXLENGTH];
-	srand(time(NULL));
-	
+	// variables
+    srand(time(NULL));
+    char q0_name[MAXLENGTH], q_name[MAXLENGTH], message[MAXLENGTH];
 	mqd_t q0, q; 										
 	struct mq_attr attrq0, attrq; 						
 	attrq0.mq_maxmsg = attrq.mq_maxmsg = MAXCAPACITY;
@@ -147,22 +169,26 @@ int main(int argc, char** argv) {
     if (DEBUG) printf("[DEBUG] Prog2 with pid %d: opened message queue with name: '%s'\n", getpid(), q_name);
 
 	sethandler(sig_handler, SIGRTMIN);
+    randArgs_t randArgs;
+    randArgs.randVal = 0;
+    randArgs.t = t;
+
+    // TODO: join the thread when exiting!!!
+    if (pthread_create(&randArgs.tid, NULL, randomizer, &randArgs)) ERR("Couldn't create thread");
 
     //
     /* Start receiving check status messages and responding to them */
     //
-    
+
     printf(".");
     fflush(stdout);
 
     // set initial notification
     setNotification(q, SIGRTMIN);
 
-    int val = rand()%2;
-
     // receive any message(s) from /q<PID> already waiting in queue
     // and send response to q0
-    processMessages(q0, q0_name, q, q_name, val);
+    processMessages(q0, q0_name, q, q_name, &randArgs);
 
     // enter sleep-randomize-receive loop
     while(1)
@@ -179,13 +205,10 @@ int main(int argc, char** argv) {
             // re-set notification
             lastSignal = 0;
             setNotification(q, SIGRTMIN);
-
-		    // randomize value
-		    val = rand()%2;
             
             // receive any message(s) from /q<PID> already waiting in queue
             // and send response to q0
-            processMessages(q0, q0_name, q, q_name, val);
+            processMessages(q0, q0_name, q, q_name, &randArgs);
         }    
 	}
 
