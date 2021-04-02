@@ -1,4 +1,3 @@
-#include <asm-generic/errno-base.h>
 #define _GNU_SOURCE
 #include <fcntl.h>
 #include <sys/types.h>
@@ -186,7 +185,7 @@ int main(int argc, char** argv)
 		// status message received
 		if (rPrio == 1)
         {
-			printf("Message received from /q%d : %d\n", rPid, rVal);
+			printf("Message received on %s from PID%d : %d\n", q0_name, rPid, rVal);
 		}
 	}
 
