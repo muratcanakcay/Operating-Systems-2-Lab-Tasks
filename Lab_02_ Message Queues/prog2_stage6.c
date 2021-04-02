@@ -13,7 +13,7 @@
 
 #define DEBUG 0
 #define MAXLENGTH 100
-#define MAXCAPACITY 100
+#define MAXCAPACITY 5
 #define MSG_CHECK_STATUS "check status"
 #define MSG_REGISTER "register"
 #define MSG_STATUS "status"
@@ -117,7 +117,7 @@ int main(int argc, char** argv)
 	if( (q0 = TEMP_FAILURE_RETRY(mq_open(q0_name, O_WRONLY, 0600, &attrq0))) == (mqd_t)-1 ) 
 	{
 		if (errno == ENOENT) fprintf(stderr, "Error: message queue \"%s\" not found\n", q0_name);
-		ERR("mq_open q0");
+		else ERR("mq_open q0");
 	}
     
 	// send register message to prog1

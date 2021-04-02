@@ -1,4 +1,6 @@
+#include <asm-generic/errno-base.h>
 #define _GNU_SOURCE
+#include <fcntl.h>
 #include <sys/types.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,7 +14,7 @@
 
 #define DEBUG 0
 #define MAXLENGTH 100
-#define MAXCAPACITY 10
+#define MAXCAPACITY 5
 #define MSG_CHECK_STATUS "check status"
 #define MSG_REGISTER "register"
 #define MSG_STATUS "status"
@@ -86,14 +88,23 @@ void child_work(pid_t rPid, int t) {
 	
 	// open /q<PID>
 	snprintf(q_name, MAXLENGTH, "/q%d", rPid);
-	if( (q = TEMP_FAILURE_RETRY(mq_open(q_name, O_WRONLY | O_CREAT, 0600, &attr))) == (mqd_t)-1) ERR("prog1 child mq_open q");
+	if( (q = TEMP_FAILURE_RETRY(mq_open(q_name, O_WRONLY | O_CREAT | O_NONBLOCK, 0600, &attr))) == (mqd_t)-1) ERR("prog1 child mq_open q");
+    
 	
 	while(1)
 	{
 		// send "check status" message to prog2
-		if(TEMP_FAILURE_RETRY(mq_send(q, MSG_CHECK_STATUS, strlen(MSG_CHECK_STATUS), 0))) ERR("prog1 child mq_send");
+		if(TEMP_FAILURE_RETRY(mq_send(q, MSG_CHECK_STATUS, strlen(MSG_CHECK_STATUS), 0)))
+        { 
+            if (errno == EAGAIN) // prog2 terminated
+            {
+                printf("\n%s closed from other side. Terminating process.\n", q_name);
+                break;
+            }
+            else ERR("prog1 child mq_send");
+        }
+
 		printf("\nMessage sent on %s : \"%s\"\n", q_name, MSG_CHECK_STATUS);
-		printf("Sleeping for %dms\n", t);
 		msleep(t);
         if (lastSignal == SIGINT) break;
 	}
@@ -108,12 +119,13 @@ void child_work(pid_t rPid, int t) {
 
 int main(int argc, char** argv) 
 {
-
-	if(argc!=3) usage();
+	// cmd line arguments
+    if(argc!=3) usage();
 	int t = strtol(argv[2], NULL, 10);
 	if (t < 100 || t > 2000) usage();
 
-	char q0_name[MAXLENGTH], message[MAXLENGTH];
+	// variables
+    char q0_name[MAXLENGTH], message[MAXLENGTH];
     unsigned rPrio;
 	int rVal;
 	pid_t rPid;
@@ -124,13 +136,17 @@ int main(int argc, char** argv)
 	attr.mq_maxmsg = MAXCAPACITY;
 	attr.mq_msgsize = MAXLENGTH;
 
-	// open q0
-	snprintf(q0_name, MAXLENGTH, "/%s", argv[1]);
-	if ( (q0 = TEMP_FAILURE_RETRY(mq_open(q0_name, O_RDONLY | O_CREAT, 0600, &attr))) == (mqd_t)-1 ) ERR("prog1 mq_open q0");
-	
-	sethandler(sigchld_handler,SIGCHLD);
+    sethandler(sigchld_handler,SIGCHLD);
     sethandler(sigHandler, SIGINT);
-    
+	
+    // open q0
+	snprintf(q0_name, MAXLENGTH, "/%s", argv[1]);
+	if ( (q0 = TEMP_FAILURE_RETRY(mq_open(q0_name, O_RDONLY | O_CREAT | O_EXCL, 0600, &attr))) == (mqd_t)-1 ) 
+    {
+        if (errno == EEXIST) fprintf(stderr, "Error: message queue \"%s\" already exists\n", q0_name);
+        ERR("prog1 mq_open q0");
+    }
+	
     //
     /* Start receiving messages until SIGINT */
     //
