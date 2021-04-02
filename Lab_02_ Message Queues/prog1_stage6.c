@@ -22,6 +22,7 @@
                      perror(source),kill(0,SIGKILL),\
 		     		     exit(EXIT_FAILURE))
 
+volatile sig_atomic_t lastSignal = 0;
 typedef unsigned int UINT;
 typedef struct timespec timespec_t;
 
@@ -31,11 +32,15 @@ void msleep(UINT milisec) {
     timespec_t req= {0};
     req.tv_sec = sec;
     req.tv_nsec = milisec * 1000000L;
-    if(nanosleep(&req,&req)) ERR("nanosleep");
+    if(nanosleep(&req,&req)) 
+    {
+        if (errno == EINTR && lastSignal == SIGINT) return;
+        ERR("nanosleep");
+    }
 }
 
 void usage(void) {
-	fprintf(stderr,"USAGE: prog1_stage2 q0_name t\n");
+	fprintf(stderr,"USAGE: prog1_stage6 q0_name t\n");
 	fprintf(stderr,"q0_name - name of the message queue\n");
 	fprintf(stderr,"t - sleep interval\n");
 	exit(EXIT_FAILURE);
@@ -47,7 +52,7 @@ void sigchld_handler(int sig) {
 	for(;;)
     {
 		pid=waitpid(0, NULL, WNOHANG);
-		if(pid > 0 && DEBUG) puts("[DEBUG] Prog1 child process terminated in handler");
+		if(pid > 0 && DEBUG) puts("Child process terminated in handler");
         if(pid == 0) return;
 		if(pid <= 0) 
         {
@@ -55,6 +60,12 @@ void sigchld_handler(int sig) {
 			ERR("waitpid");
 		}
 	}
+}
+
+void sigHandler(int sig) 
+{
+	lastSignal = sig;
+    if (DEBUG) printf("Signal received: %d\n", sig);
 }
 
 void sethandler( void (*f)(int), int sigNo) {
@@ -84,28 +95,30 @@ void child_work(pid_t rPid, int t) {
 		printf("\nMessage sent on %s : \"%s\"\n", q_name, MSG_CHECK_STATUS);
 		printf("Sleeping for %dms\n", t);
 		msleep(t);
+        if (lastSignal == SIGINT) break;
 	}
 	
-	// close /q<PID>
+	// close and unlink /q<PID>
 	if (mq_close(q) < 0) ERR("prog1 child mq_close");
+	if (mq_unlink(q_name) < 0) ERR("mq unlink");
+    printf("%s closed and unlinked.\n", q_name);
 
 	exit(EXIT_SUCCESS);
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv) 
+{
 
 	if(argc!=3) usage();
 	int t = strtol(argv[2], NULL, 10);
 	if (t < 100 || t > 2000) usage();
 
 	char q0_name[MAXLENGTH], message[MAXLENGTH];
-    char* rMsg;
     unsigned rPrio;
 	int rVal;
 	pid_t rPid;
-	pid_t pid;
+    pid_t pid;
 	ssize_t msgLength;
-
 	mqd_t q0;
 	struct mq_attr attr;
 	attr.mq_maxmsg = MAXCAPACITY;
@@ -116,39 +129,59 @@ int main(int argc, char** argv) {
 	if ( (q0 = TEMP_FAILURE_RETRY(mq_open(q0_name, O_RDONLY | O_CREAT, 0600, &attr))) == (mqd_t)-1 ) ERR("prog1 mq_open q0");
 	
 	sethandler(sigchld_handler,SIGCHLD);
+    sethandler(sigHandler, SIGINT);
     
+    //
+    /* Start receiving messages until SIGINT */
+    //
+
     while(1)
 	{
         // receive message from prog2
-		if ( (msgLength = TEMP_FAILURE_RETRY(mq_receive(q0, message, MAXLENGTH, &rPrio))) < 1) ERR("prog1 mq_receive");
-		message[msgLength]='\0';
+		while (1)
+        {
+            errno = 0;
+            if ( (msgLength = (mq_receive(q0, message, MAXLENGTH, &rPrio))) < 1)
+            {
+                if (lastSignal == SIGINT) break;
+                else if (errno == EINTR) continue;
+                else ERR("mq_receive");
+            }
+            else break;
+        }        
+        if (lastSignal == SIGINT) break;
 
 		// process message
-		rMsg = NULL;  // TODO: free() rMsg if it's not NULL before exiting program (stage6)
-		if (sscanf(message, "%ms %d %d", &rMsg, &rPid, &rVal) < 2) continue; // should I check for ENOMEM?
-		
-		// register message received -- HOW MUCH ERROR CHECKING REQUIRED FOR MSG?
+        message[msgLength]='\0';
+		if (sscanf(message, "%*s %d %d", &rPid, &rVal) < 1)
+        {
+            if (errno == ENOMEM) ERR("sscanf");
+            else continue;
+        }
+
+		// register message received
         if (rPrio == 0)
         {
 			printf("\n-----Register message received : %d\n", rPid);
-			if ( (pid=fork()) < 0 ) ERR("fork");
+			if ( (pid = fork()) < 0 ) ERR("fork");
         	if (0 == pid) child_work(rPid, t);
 		}
 
-		// status message received -- HOW MUCH ERROR CHECKING REQUIRED FOR MSG?
+		// status message received
 		if (rPrio == 1)
         {
 			printf("Message received from /q%d : %d\n", rPid, rVal);
 		}
-
-        free(rMsg);
 	}
-	
-	// close q0
-	if (mq_close(q0) < 0) ERR("prog1 mq_close");
-	//if (mq_unlink(q0_name) < 0) ERR("mq unlink");
 
-	while(wait(NULL)>0) if (DEBUG) printf("[DEBUG] Prog1 child process terminated in wait\n");
+    puts("\nSIGINT received, exiting...");
+    
+    // close and unlink q0
+	if (mq_close(q0) < 0) ERR("prog1 mq_close");
+	if (mq_unlink(q0_name) < 0) ERR("mq unlink");
+    printf("q0 closed and unlinked.\n");
+
+	while(wait(NULL)>0) printf("Child process terminated in wait\n");
 	
 	return EXIT_SUCCESS;
 }

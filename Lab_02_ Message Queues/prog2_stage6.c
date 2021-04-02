@@ -41,7 +41,7 @@ void mSleep(UINT milisec) {
 }
 
 void usage(void) {
-	fprintf(stderr,"USAGE: prog2_stage2 q0_name t\n");
+	fprintf(stderr,"USAGE: prog2_stage6 q0_name t\n");
 	fprintf(stderr,"q0_name - name of the message queue\n");
 	fprintf(stderr,"t - sleep interval\n");
 	exit(EXIT_FAILURE);
