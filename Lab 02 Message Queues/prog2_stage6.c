@@ -20,14 +20,14 @@
 
 #define ERR(source) (fprintf(stderr,"%s:%d\n",__FILE__,__LINE__),\
                      perror(source),kill(0,SIGKILL),\
-		     		     exit(EXIT_FAILURE))
+                          exit(EXIT_FAILURE))
 
 volatile sig_atomic_t lastSignal = 0;
 typedef unsigned int UINT;
 typedef struct timespec timespec_t;
 typedef struct {
-	pthread_t tid;
-	int randVal;
+    pthread_t tid;
+    int randVal;
     int t;
 } randArgs_t;
 
@@ -41,39 +41,39 @@ void mSleep(UINT milisec) {
 }
 
 void usage(void) {
-	fprintf(stderr,"USAGE: prog2_stage6 q0_name t\n");
-	fprintf(stderr,"q0_name - name of the message queue\n");
-	fprintf(stderr,"t - sleep interval\n");
-	exit(EXIT_FAILURE);
+    fprintf(stderr,"USAGE: prog2_stage6 q0_name t\n");
+    fprintf(stderr,"q0_name - name of the message queue\n");
+    fprintf(stderr,"t - sleep interval\n");
+    exit(EXIT_FAILURE);
 }
 
 void setHandler( void (*f)(int), int sigNo) {
-	struct sigaction act;
-	memset(&act, 0, sizeof(struct sigaction));
-	act.sa_handler = f;
-	if (-1==sigaction(sigNo, &act, NULL)) ERR("sigaction");
+    struct sigaction act;
+    memset(&act, 0, sizeof(struct sigaction));
+    act.sa_handler = f;
+    if (-1==sigaction(sigNo, &act, NULL)) ERR("sigaction");
 }
 
 void sigHandler(int sig) 
 {
-	lastSignal = sig;
+    lastSignal = sig;
     if (DEBUG) printf("Signal received: %d\n", sig);
 }
 
 timespec_t setTimer(int t) 
 {
-	timespec_t spec;
-	clock_gettime(CLOCK_REALTIME, &spec);
-	
-	spec.tv_nsec += t * 1.0e6;
-	
-	while(spec.tv_nsec > 1.0e9)
-	{
-		spec.tv_nsec -= 1.0e9;
-		spec.tv_sec++;
-	}
+    timespec_t spec;
+    clock_gettime(CLOCK_REALTIME, &spec);
+    
+    spec.tv_nsec += t * 1.0e6;
+    
+    while(spec.tv_nsec > 1.0e9)
+    {
+        spec.tv_nsec -= 1.0e9;
+        spec.tv_sec++;
+    }
 
-	return spec;
+    return spec;
 }
 
 // randomizes the value every t ms
@@ -95,38 +95,38 @@ int main(int argc, char** argv)
 {
     // cmd line arguments
     if(argc!=3) usage();
-	int t = strtol(argv[2], NULL, 10);
-	if (t < 100 || t > 2000) usage();
+    int t = strtol(argv[2], NULL, 10);
+    if (t < 100 || t > 2000) usage();
 
-	// variables
+    // variables
     srand(time(NULL));
     char q0_name[MAXLENGTH], q_name[MAXLENGTH], message[MAXLENGTH];
-	mqd_t q0, q;
+    mqd_t q0, q;
     int msgLength;
-	struct mq_attr attrq0, attrq;
-	attrq0.mq_maxmsg = attrq.mq_maxmsg = MAXCAPACITY;
-	attrq0.mq_msgsize = attrq.mq_msgsize = MAXLENGTH;
+    struct mq_attr attrq0, attrq;
+    attrq0.mq_maxmsg = attrq.mq_maxmsg = MAXCAPACITY;
+    attrq0.mq_msgsize = attrq.mq_msgsize = MAXLENGTH;
     randArgs_t randArgs; // for randomizer thread
     randArgs.randVal = 0;
     randArgs.t = t;
-	
+    
     setHandler(sigHandler, SIGINT);
 
-	// open q0 
-	snprintf(q0_name, MAXLENGTH, "/%s", argv[1]);
-	if( (q0 = TEMP_FAILURE_RETRY(mq_open(q0_name, O_WRONLY, 0600, &attrq0))) == (mqd_t)-1 ) 
-	{
-		if (errno == ENOENT) fprintf(stderr, "Error: message queue \"%s\" not found\n", q0_name);
-		else ERR("mq_open q0");
-	}
+    // open q0 
+    snprintf(q0_name, MAXLENGTH, "/%s", argv[1]);
+    if( (q0 = TEMP_FAILURE_RETRY(mq_open(q0_name, O_WRONLY, 0600, &attrq0))) == (mqd_t)-1 ) 
+    {
+        if (errno == ENOENT) fprintf(stderr, "Error: message queue \"%s\" not found\n", q0_name);
+        else ERR("mq_open q0");
+    }
     
-	// send register message to prog1
-	snprintf (message, MAXLENGTH, "%s %d", MSG_REGISTER, getpid());
-	if (TEMP_FAILURE_RETRY(mq_send(q0, message, strlen(message), 0))) ERR("mq_send");
-	printf("Message sent on %s : '%s'\n", q0_name, message);
+    // send register message to prog1
+    snprintf (message, MAXLENGTH, "%s %d", MSG_REGISTER, getpid());
+    if (TEMP_FAILURE_RETRY(mq_send(q0, message, strlen(message), 0))) ERR("mq_send");
+    printf("Message sent on %s : '%s'\n", q0_name, message);
 
     // open /q<PID>
-	snprintf (q_name, MAXLENGTH, "/q%d", getpid());
+    snprintf (q_name, MAXLENGTH, "/q%d", getpid());
     if ( (q = TEMP_FAILURE_RETRY(mq_open(q_name, O_RDONLY, 0600, &attrq))) == (mqd_t)-1 ) ERR("mq_open q");
     printf("%d: opened message queue with name: '%s'\n", getpid(), q_name);
 
@@ -138,15 +138,15 @@ int main(int argc, char** argv)
     //
 
     while(1)
-	{
-		printf(".");
-		fflush(stdout);
+    {
+        printf(".");
+        fflush(stdout);
         
         // set timer
-		timespec_t waitTime = setTimer(t);
-		
-		// wait for message from /q<PID>
-		while (1)
+        timespec_t waitTime = setTimer(t);
+        
+        // wait for message from /q<PID>
+        while (1)
         {
             errno = 0;
             if ( (msgLength = mq_timedreceive(q, message, MAXLENGTH, NULL, &waitTime)) < 1 )
@@ -160,14 +160,14 @@ int main(int argc, char** argv)
         if (lastSignal == SIGINT) break;
         if (errno == ETIMEDOUT) continue;
 
-		message[msgLength]='\0';
-		printf("\nMessage received on %s : '%s'\n", q_name, message);
+        message[msgLength]='\0';
+        printf("\nMessage received on %s : '%s'\n", q_name, message);
 
-		// send response
+        // send response
         snprintf (message, MAXLENGTH, "%s %d %d", MSG_STATUS, getpid(), randArgs.randVal);
-		if (TEMP_FAILURE_RETRY(mq_send(q0, message, strlen(message), 1))) ERR("mq_send");
-		printf("Message sent on %s : '%s'\n", q0_name, message);
-	}
+        if (TEMP_FAILURE_RETRY(mq_send(q0, message, strlen(message), 1))) ERR("mq_send");
+        printf("Message sent on %s : '%s'\n", q0_name, message);
+    }
 
     puts("\nSIGINT received, exiting...");
 
@@ -178,8 +178,8 @@ int main(int argc, char** argv)
 
     // close q0 and /q<PID> (for stage 6)
     if (mq_close(q0)) ERR("mq_close");
-	if (mq_close(q)) ERR("mq_close");
+    if (mq_close(q)) ERR("mq_close");
     puts("Queues closed.");
-	
-	return EXIT_SUCCESS;
+    
+    return EXIT_SUCCESS;
 }
