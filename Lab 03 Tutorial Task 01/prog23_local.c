@@ -23,6 +23,7 @@ int sethandler( void (*f)(int), int sigNo) {
 	return 0;
 }
 
+// make socket
 int make_socket(char* name , struct sockaddr_un *addr){
 	int socketfd;
 	if((socketfd = socket(PF_UNIX,SOCK_STREAM,0))<0) ERR("socket");
@@ -32,6 +33,7 @@ int make_socket(char* name , struct sockaddr_un *addr){
 	return socketfd;
 }
 
+// connect
 int connect_socket(char *name){
 	struct sockaddr_un addr;
 	int socketfd;
@@ -83,6 +85,7 @@ ssize_t bulk_write(int fd, char *buf, size_t count){
 	return len ;
 }
 
+// htonl
 void prepare_request(char **argv,int32_t data[5]){
 	data[0]=htonl(atoi(argv[2]));
 	data[1]=htonl(atoi(argv[3]));

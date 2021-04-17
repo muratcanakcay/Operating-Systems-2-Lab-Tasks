@@ -33,6 +33,7 @@ int sethandler( void (*f)(int), int sigNo) {
 	return 0;
 }
 
+// make socket
 int make_socket(char* name , struct sockaddr_un *addr){
 	int socketfd;
 	if((socketfd = socket(PF_UNIX,SOCK_STREAM,0))<0) ERR("socket");
@@ -42,6 +43,7 @@ int make_socket(char* name , struct sockaddr_un *addr){
 	return socketfd;
 }
 
+// bind socket
 int bind_socket(char *name){
 	struct sockaddr_un addr;
 	int socketfd;
@@ -113,6 +115,7 @@ void calculate(int32_t data[5]){
 	data[2]=htonl(result);
 }
 
+// pselect
 void doServer(int fdL){
 	int cfd;
 	int32_t data[5];
