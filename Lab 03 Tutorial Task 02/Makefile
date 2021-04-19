@@ -1,14 +1,14 @@
 CC=gcc
 CFLAGS= -std=gnu99 -Wall -lm -lrt
 
-all: prog24c prog24s
+all: prog_c prog_s
 
-prog24c: prog24c.c
-	gcc -o prog24c prog24c.c -Wall -lpthread -lm
+prog_c: prog_c.c
+	gcc -o prog_c prog_c.c -Wall -lpthread -lm
 
-prog24s: prog24s.c
-	gcc -o prog24s prog24s.c -Wall -lpthread -lm
+prog_s: prog_s.c
+	gcc -o prog_s prog_s.c -Wall -lpthread -lm
 
 .PHONY: clean all
 clean:
-	rm prog24s prog24c
+	rm prog_s prog_c
