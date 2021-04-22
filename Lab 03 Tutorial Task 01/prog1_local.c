@@ -24,20 +24,20 @@ int sethandler( void (*f)(int), int sigNo) {
 }
 
 // make socket
-int make_socket(char* name , struct sockaddr_un *addr){
+int make_socket(char* name, struct sockaddr_un *addr){
 	int socketfd;
-	if((socketfd = socket(PF_UNIX,SOCK_STREAM,0))<0) ERR("socket");
+	if((socketfd = socket(PF_UNIX,SOCK_STREAM, 0)) < 0) ERR("socket");
 	memset(addr, 0, sizeof(struct sockaddr_un));
 	addr->sun_family = AF_UNIX;
-	strncpy(addr->sun_path,name,sizeof(addr->sun_path)-1);
+	strncpy(addr->sun_path, name, sizeof(addr->sun_path)-1);
 	return socketfd;
 }
 
-// connect
+// connect socket
 int connect_socket(char *name){
 	struct sockaddr_un addr;
 	int socketfd;
-	socketfd = make_socket(name,&addr);
+	socketfd = make_socket(name, &addr);
 	if(connect(socketfd,(struct sockaddr*) &addr,SUN_LEN(&addr)) < 0){
 		if(errno!=EINTR) ERR("connect");
 		else { 
@@ -111,8 +111,10 @@ int main(int argc, char** argv) {
 	fd=connect_socket(argv[1]);
 	prepare_request(argv,data);
 	/*
-	 * 	 * Broken PIPE is treated as critical error here
-	 * 	 	 */
+	 * 	 
+	 * Broken PIPE is treated as critical error here
+	 * 	 	 
+	 */
 	if(bulk_write(fd,(char *)data,sizeof(int32_t[5]))<0) ERR("write:");
 	if(bulk_read(fd,(char *)data,sizeof(int32_t[5]))<(int)sizeof(int32_t[5])) ERR("read:");
 	print_answer(data);

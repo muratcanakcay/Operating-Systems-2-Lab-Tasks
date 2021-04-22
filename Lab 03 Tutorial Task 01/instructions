@@ -41,11 +41,11 @@ Goal:
 2. Local connection client
 
 How to run:
-$ ./prog1a_s a 2000&
+$ ./prog1_s a 2000&
 $ ./prog1_local a 2 1 +
 $ ./prog1_local a 2 1 '*'
 $ ./prog1_local a 2 0 /
-$ killall -s SIGINT prog23a_s
+$ killall -s SIGINT prog1_s
 
 
 ----------------
@@ -57,7 +57,7 @@ Goal:
 
 How to run:
 $ ./prog2_tcp localhost 2000 234 17  /
-$ ./prog2_local a 2 1 '*'
+$ ./prog1_local a 2 1 '*'
 $ killall -s SIGINT prog2_s
 
 In pairs check each other host name (it is in command line, eg. p21803), each of you starts 

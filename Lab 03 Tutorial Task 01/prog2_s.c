@@ -18,9 +18,11 @@
 
 #define BACKLOG 3
 volatile sig_atomic_t do_work=1 ;
+
 void sigint_handler(int sig) {
 	do_work=0;
 }
+
 int sethandler( void (*f)(int), int sigNo) {
 	struct sigaction act;
 	memset(&act, 0, sizeof(struct sigaction));
@@ -29,12 +31,15 @@ int sethandler( void (*f)(int), int sigNo) {
 		return -1;
 	return 0;
 }
+
+// make socket
 int make_socket(int domain, int type){
 	int sock;
 	sock = socket(domain,type,0);
 	if(sock < 0) ERR("socket");
 	return sock;
 }
+
 int bind_local_socket(char *name){
 	struct sockaddr_un addr;
 	int socketfd;
@@ -129,20 +134,30 @@ void doServer(int fdL, int fdT){
 	int cfd,fdmax;
 	fd_set base_rfds, rfds ;
 	sigset_t mask, oldmask;
+	
+	// set base_rfds once and use in the loop to reset rfds
 	FD_ZERO(&base_rfds);
 	FD_SET(fdL, &base_rfds);
 	FD_SET(fdT, &base_rfds);
+	
+	// get max fd
 	fdmax=(fdT>fdL?fdT:fdL);
+	
+	// set signal mask for pselect
 	sigemptyset (&mask);
 	sigaddset (&mask, SIGINT);
 	sigprocmask (SIG_BLOCK, &mask, &oldmask);
+	
 	while(do_work){
 		rfds=base_rfds;
+		
 		if(pselect(fdmax+1,&rfds,NULL,NULL,NULL,&oldmask)>0){
 			if(FD_ISSET(fdL,&rfds)) cfd=add_new_client(fdL);
 			else  cfd=add_new_client(fdT);
+			
 			if(cfd>=0)communicate(cfd);
-		}else{
+		}
+		else{
 			if(EINTR==errno) continue;
 			ERR("pselect");
 		}
@@ -156,15 +171,23 @@ int main(int argc, char** argv) {
 		usage(argv[0]);
 		return EXIT_FAILURE;
 	}
+
 	if(sethandler(SIG_IGN,SIGPIPE)) ERR("Seting SIGPIPE:");
 	if(sethandler(sigint_handler,SIGINT)) ERR("Seting SIGINT:");
+	
+	// make and bind both local and tcp sockets
 	fdL=bind_local_socket(argv[1]);
-	new_flags = fcntl(fdL, F_GETFL) | O_NONBLOCK;
-	fcntl(fdL, F_SETFL, new_flags);
 	fdT=bind_tcp_socket(atoi(argv[2]));
+	
+	// set both local and tcp sockets to nonblocking
+	new_flags = fcntl(fdL, F_GETFL) | O_NONBLOCK;
 	new_flags = fcntl(fdT, F_GETFL) | O_NONBLOCK;
+	fcntl(fdL, F_SETFL, new_flags);
 	fcntl(fdT, F_SETFL, new_flags);
+	
+	// accept connections and read data
 	doServer(fdL,fdT);
+	
 	if(TEMP_FAILURE_RETRY(close(fdL))<0)ERR("close");
 	if(unlink(argv[1])<0)ERR("unlink");
 	if(TEMP_FAILURE_RETRY(close(fdT))<0)ERR("close");

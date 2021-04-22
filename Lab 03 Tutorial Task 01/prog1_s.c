@@ -54,6 +54,7 @@ int bind_socket(char *name){
 	return socketfd;
 }
 
+// accept incoming connection request
 int add_new_client(int sfd){
 	int nfd;
 	if((nfd=TEMP_FAILURE_RETRY(accept(sfd,NULL,NULL)))<0) {
@@ -122,11 +123,16 @@ void doServer(int fdL){
 	ssize_t size;
 	fd_set base_rfds, rfds ;
 	sigset_t mask, oldmask;
+	
+	// set base_rfds once and use in the loop to reset rfds
 	FD_ZERO(&base_rfds);
 	FD_SET(fdL, &base_rfds);
+	
+	// signal mask
 	sigemptyset (&mask);
 	sigaddset (&mask, SIGINT);
 	sigprocmask (SIG_BLOCK, &mask, &oldmask);
+
 	while(do_work){
 		rfds=base_rfds;
 		if(pselect(fdL+1,&rfds,NULL,NULL,NULL,&oldmask)>0){
@@ -153,12 +159,22 @@ int main(int argc, char** argv) {
 		usage(argv[0]);
 		return EXIT_FAILURE;
 	}
+
+	// signal handling
 	if(sethandler(SIG_IGN,SIGPIPE)) ERR("Seting SIGPIPE:");
 	if(sethandler(sigint_handler,SIGINT)) ERR("Seting SIGINT:");
+	
+	// make socket & bind socket
 	fdL=bind_socket(argv[1]);
+	
+	// set socket to non-blocking
 	new_flags = fcntl(fdL, F_GETFL) | O_NONBLOCK;
 	fcntl(fdL, F_SETFL, new_flags);
+
+	// start pselect loop
 	doServer(fdL);
+
+	// end sequence
 	if(TEMP_FAILURE_RETRY(close(fdL))<0)ERR("close");
 	if(unlink(argv[1])<0)ERR("unlink");
 	fprintf(stderr,"Server has terminated.\n");
