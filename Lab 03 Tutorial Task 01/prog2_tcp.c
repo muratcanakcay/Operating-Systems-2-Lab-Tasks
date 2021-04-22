@@ -22,12 +22,14 @@ int sethandler( void (*f)(int), int sigNo) {
 		return -1;
 	return 0;
 }
+
 int make_socket(void){
 	int sock;
 	sock = socket(PF_INET,SOCK_STREAM,0);
 	if(sock < 0) ERR("socket");
 	return sock;
 }
+
 struct sockaddr_in make_address(char *address, char *port){
 	int ret;
 	struct sockaddr_in addr;
@@ -42,6 +44,7 @@ struct sockaddr_in make_address(char *address, char *port){
 	freeaddrinfo(result);
 	return addr;
 }
+
 int connect_socket(char *name, char *port){
 	struct sockaddr_in addr;
 	int socketfd;
@@ -62,6 +65,7 @@ int connect_socket(char *name, char *port){
 	}
 	return socketfd;
 }
+
 ssize_t bulk_read(int fd, char *buf, size_t count){
 	int c;
 	size_t len=0;
@@ -75,6 +79,7 @@ ssize_t bulk_read(int fd, char *buf, size_t count){
 	}while(count>0);
 	return len ;
 }
+
 ssize_t bulk_write(int fd, char *buf, size_t count){
 	int c;
 	size_t len=0;
@@ -87,6 +92,7 @@ ssize_t bulk_write(int fd, char *buf, size_t count){
 	}while(count>0);
 	return len ;
 }
+
 void prepare_request(char **argv,int32_t data[5]){
 	data[0]=htonl(atoi(argv[3]));
 	data[1]=htonl(atoi(argv[4]));
@@ -94,14 +100,17 @@ void prepare_request(char **argv,int32_t data[5]){
 	data[3]=htonl((int32_t)(argv[5][0]));
 	data[4]=htonl(1);
 }
+
 void print_answer(int32_t data[5]){
 	if(ntohl(data[4]))
 		printf("%d %c %d = %d\n", ntohl(data[0]),(char)ntohl(data[3]), ntohl(data[1]), ntohl(data[2]));
 	else printf("Operation impossible\n");
 }
+
 void usage(char * name){
 	fprintf(stderr,"USAGE: %s domain port  operand1 operand2 operation \n",name);
 }
+
 int main(int argc, char** argv) {
 	int fd;
 	int32_t data[5];
