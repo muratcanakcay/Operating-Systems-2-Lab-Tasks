@@ -19,6 +19,10 @@
 #define BACKLOG 3
 volatile sig_atomic_t do_work=1 ;
 
+void usage(char * name){
+	fprintf(stderr,"USAGE: %s socket port\n",name);
+}
+
 void sigint_handler(int sig) {
 	do_work=0;
 }
@@ -40,6 +44,7 @@ int make_socket(int domain, int type){
 	return sock;
 }
 
+// bind local socket
 int bind_local_socket(char *name){
 	struct sockaddr_un addr;
 	int socketfd;
@@ -52,19 +57,26 @@ int bind_local_socket(char *name){
 	if(listen(socketfd, BACKLOG) < 0) ERR("listen");
 	return socketfd;
 }
+
+// bind tcp socket
 int bind_tcp_socket(uint16_t port){
 	struct sockaddr_in addr;
-	int socketfd,t=1;
+	int socketfd, t = 1;
+	
 	socketfd = make_socket(PF_INET,SOCK_STREAM);
 	memset(&addr, 0, sizeof(struct sockaddr_in));
+
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons(port);
 	addr.sin_addr.s_addr = htonl(INADDR_ANY);
-	if (setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR,&t, sizeof(t))) ERR("setsockopt");
+	
+	if (setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR, &t, sizeof(t))) ERR("setsockopt");
 	if(bind(socketfd,(struct sockaddr*) &addr,sizeof(addr)) < 0)  ERR("bind");
 	if(listen(socketfd, BACKLOG) < 0) ERR("listen");
 	return socketfd;
 }
+
+// accept connection
 int add_new_client(int sfd){
 	int nfd;
 	if((nfd=TEMP_FAILURE_RETRY(accept(sfd,NULL,NULL)))<0) {
@@ -73,9 +85,7 @@ int add_new_client(int sfd){
 	}
 	return nfd;
 }
-void usage(char * name){
-	fprintf(stderr,"USAGE: %s socket port\n",name);
-}
+
 ssize_t bulk_read(int fd, char *buf, size_t count){
 	int c;
 	size_t len=0;
@@ -89,6 +99,7 @@ ssize_t bulk_read(int fd, char *buf, size_t count){
 	}while(count>0);
 	return len ;
 }
+
 ssize_t bulk_write(int fd, char *buf, size_t count){
 	int c;
 	size_t len=0;
@@ -101,6 +112,7 @@ ssize_t bulk_write(int fd, char *buf, size_t count){
 	}while(count>0);
 	return len ;
 }
+
 void calculate(int32_t data[5]){
 	int32_t op1,op2,result,status=1;
 	op1=ntohl(data[0]);
@@ -120,6 +132,7 @@ void calculate(int32_t data[5]){
 	data[4]=htonl(status);
 	data[2]=htonl(result);
 }
+
 void communicate(int cfd){
 	ssize_t size;
 	int32_t data[5];
@@ -130,6 +143,8 @@ void communicate(int cfd){
 	}
 	if(TEMP_FAILURE_RETRY(close(cfd))<0)ERR("close");
 }
+
+// pselect
 void doServer(int fdL, int fdT){
 	int cfd,fdmax;
 	fd_set base_rfds, rfds ;
