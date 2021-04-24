@@ -57,8 +57,8 @@ int bind_tcp_socket(uint16_t port){
 	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 	
 	if (setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR, &t, sizeof(t))) ERR("setsockopt");
-	if(bind(socketfd,(struct sockaddr*) &addr,sizeof(addr)) < 0)  ERR("bind");
-	if(listen(socketfd, BACKLOG) < 0) ERR("listen");
+	if (bind(socketfd,(struct sockaddr*) &addr,sizeof(addr)) < 0) ERR("bind");
+	if (listen(socketfd, BACKLOG) < 0) ERR("listen");
 	return socketfd;
 }
 
@@ -67,7 +67,8 @@ int add_new_client(int sfd){
 	int nfd;
     socklen_t size = sizeof(struct sockaddr_in);
     struct sockaddr_in addr;
-	if((nfd=TEMP_FAILURE_RETRY(accept(sfd, &addr, &size)))<0) {
+	if( (nfd=TEMP_FAILURE_RETRY(accept(sfd, &addr, &size))) < 0 ) 
+    {
 		if(EAGAIN==errno||EWOULDBLOCK==errno) return -1;
 		ERR("accept");
 	}
@@ -77,35 +78,39 @@ int add_new_client(int sfd){
 
 ssize_t bulk_read(int fd, char *buf, size_t count){
 	int c;
-	size_t len=0;
-	do{
-		c=TEMP_FAILURE_RETRY(read(fd,buf,count));
-		if(c<0) return c;
-		if(0==c) return len;
-		buf+=c;
-		len+=c;
-		count-=c;
-	}while(count>0);
-	return len ;
+	size_t len = 0;
+	do
+    {
+		c = TEMP_FAILURE_RETRY(read(fd, buf, count));
+		if (c < 0) return c;
+		if (0 == c) return len;
+		buf += c;
+		len += c;
+		count -= c;
+	} while(count > 0);
+
+	return len;
 }
 
 ssize_t bulk_write(int fd, char *buf, size_t count){
 	int c;
 	size_t len=0;
 	
-    do{
-		c=TEMP_FAILURE_RETRY(write(fd, buf, count));
-		if(c<0) return c;
-		buf+=c;
-		len+=c;
-		count-=c;
-	} while(count>0);
+    do
+    {
+		c = TEMP_FAILURE_RETRY(write(fd, buf, count));
+		if (c < 0) return c;
+		buf += c;
+		len += c;
+		count -= c;
+	} while(count > 0);
 	
-    return len ;
+    return len;
 }
 
 // pselect
-void doServer(int fdT){
+void doServer(int fdT)
+{
 	int cfd, cons=0;
 	fd_set base_rfds, rfds;
 	sigset_t mask, oldmask;
