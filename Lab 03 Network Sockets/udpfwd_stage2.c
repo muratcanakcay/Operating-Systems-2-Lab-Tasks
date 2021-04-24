@@ -143,7 +143,8 @@ void doServer(int fdT)
                 // if recv() call returns zero, it means the connection is closed on the other side
                 if (recv(con[i], buf, sizeof(buf), MSG_PEEK | MSG_DONTWAIT) == 0) 
                 {
-                    close(con[i]);
+                    if (TEMP_FAILURE_RETRY(close(con[i])) < 0) ERR("close");
+                    fprintf(stderr, "client disconnected closing socket.\n");
                     con[i] = -1;
                     cons--;
                 }
@@ -164,6 +165,7 @@ void doServer(int fdT)
                         {
                             con[i] = cfd;
                             added = 1;
+                            fprintf(stderr, "client connected.\n");
                             break;
                         }
                     }
@@ -174,6 +176,7 @@ void doServer(int fdT)
                 else // don't add new client, send info msg.
                 {
                     if (bulk_write(cfd, full, sizeof(full)) < 0 && errno!=EPIPE) ERR("write:");
+                    fprintf(stderr, "client connection request refused.\n");
     				if (TEMP_FAILURE_RETRY(close(cfd)) < 0) ERR("close");
                 }
 			}
@@ -184,6 +187,21 @@ void doServer(int fdT)
             }
         }
 	}
+
+    perror("SIGINT received.\n");
+
+    // close open sockets
+    for (int i = 0; i < BACKLOG; i++) 
+    {
+        if (con[i] != -1)
+        {
+            if (TEMP_FAILURE_RETRY(close(con[i])) < 0) ERR("close");
+            perror("closed socket.\n");
+        }
+    }
+
+
+
 	sigprocmask (SIG_UNBLOCK, &mask, NULL);
 }
 
@@ -212,6 +230,6 @@ int main(int argc, char** argv)
 	doServer(fdT);
 	
 	if (TEMP_FAILURE_RETRY(close(fdT)) < 0) ERR("close");
-	fprintf(stderr,"Server has terminated.\n");
+	fprintf(stderr, "Server has terminated.\n");
 	return EXIT_SUCCESS;
 }
