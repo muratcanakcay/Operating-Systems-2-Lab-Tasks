@@ -114,7 +114,7 @@ ssize_t bulk_write(int fd, char *buf, size_t count){
 void doServer(int fdT)
 {
 	int cfd, cons=0;
-	fd_set base_rfds, rfds, efds;
+	fd_set base_rfds, rfds;
 	sigset_t mask, oldmask;
     char data[] = "Hello message\n";
     char full[] = "Max no of clients reached. Connection not accepted.\n";
