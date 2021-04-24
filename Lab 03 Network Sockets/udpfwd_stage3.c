@@ -67,10 +67,10 @@ int bind_tcp_socket(uint16_t port){
 // accept connection
 int add_new_client(int sfd){
 	int nfd;
-    socklen_t size = sizeof(struct sockaddr_in);
-    struct sockaddr_in addr;
+	socklen_t size = sizeof(struct sockaddr_in);
+	struct sockaddr_in addr;
 	if( (nfd=TEMP_FAILURE_RETRY(accept(sfd, &addr, &size))) < 0 ) 
-    {
+	{
 		if(EAGAIN==errno||EWOULDBLOCK==errno) return -1;
 		ERR("accept");
 	}
@@ -82,7 +82,7 @@ ssize_t bulk_read(int fd, char *buf, size_t count){
 	int c;
 	size_t len = 0;
 	do
-    {
+	{
 		c = TEMP_FAILURE_RETRY(read(fd, buf, count));
 		if (c < 0) return c;
 		if (0 == c) return len;
@@ -98,8 +98,8 @@ ssize_t bulk_write(int fd, char *buf, size_t count){
 	int c;
 	size_t len=0;
 	
-    do
-    {
+	do
+	{
 		c = TEMP_FAILURE_RETRY(write(fd, buf, count));
 		if (c < 0) return c;
 		buf += c;
@@ -107,7 +107,7 @@ ssize_t bulk_write(int fd, char *buf, size_t count){
 		count -= c;
 	} while(count > 0);
 	
-    return len;
+	return len;
 }
 
 // pselect
@@ -116,11 +116,11 @@ void doServer(int fdT)
 	int cfd, cons=0;
 	fd_set base_rfds, rfds;
 	sigset_t mask, oldmask;
-    char data[] = "Hello message\n";
-    char full[] = "Max no of clients reached. Connection not accepted.\n";
-    char buf[10];
-    int con[BACKLOG];
-    for (int i = 0; i < BACKLOG; i++) con[i] = -1;
+	char data[] = "Hello message\n";
+	char full[] = "Max no of clients reached. Connection not accepted.\n";
+	char buf[10];
+	int con[BACKLOG];
+	for (int i = 0; i < BACKLOG; i++) con[i] = -1;
 	
 	// set base_rfds once and use in the loop to reset rfds
 	FD_ZERO(&base_rfds);
@@ -132,72 +132,72 @@ void doServer(int fdT)
 	sigprocmask (SIG_BLOCK, &mask, &oldmask);    
 	
 	while(do_work)
-    {
+	{
 		rfds = base_rfds;
 		
 		if (pselect(FD_SETSIZE, &rfds, NULL, NULL, NULL, &oldmask) > 0)
-        {
-            // check for client disconnects
-            for (int i = 0; i < BACKLOG; i++)
-            {
-                // if recv() call returns zero, it means the connection is closed on the other side
-                if (FD_ISSET(con[i], &rfds) && recv(con[i], buf, sizeof(buf), MSG_PEEK) == 0) 
-                {
-                    if (TEMP_FAILURE_RETRY(close(con[i])) < 0) ERR("close");
-                    fprintf(stderr, "Client disconnected closing socket. [%d]\n", --cons);
-                    FD_CLR(con[i], &base_rfds);
-                    con[i] = -1;
-                }
-            }
-            
-            //  new client connection
-            if (FD_ISSET(fdT, &rfds) && (cfd = add_new_client(fdT)) > 0)
-            {
+		{
+			// check for client disconnects
+			for (int i = 0; i < BACKLOG; i++)
+			{
+				// if recv() call returns zero, it means the connection is closed on the other side
+				if (FD_ISSET(con[i], &rfds) && recv(con[i], buf, sizeof(buf), MSG_PEEK) == 0) 
+				{
+					if (TEMP_FAILURE_RETRY(close(con[i])) < 0) ERR("close");
+					fprintf(stderr, "Client disconnected closing socket. [%d]\n", --cons);
+					FD_CLR(con[i], &base_rfds);
+					con[i] = -1;
+				}
+			}
+			
+			//  new client connection
+			if (FD_ISSET(fdT, &rfds) && (cfd = add_new_client(fdT)) > 0)
+			{
 				// if less than 3 clients add new client
-                if (cons < 3)
-                {
-                    int added = 0;
-                    for (int i = 0; i < BACKLOG; i++) 
-                    {
-                        if (con[i] == -1)
-                        {
-                            con[i] = cfd;
-                            FD_SET(cfd, &base_rfds);
-                            added = 1;
-                            fprintf(stderr, "Client connected. [%d]\n", ++cons);
-                            break;
-                        }
-                    }
-                    if (!added) ERR("Connection add error");
-                    
-                    if(bulk_write(cfd, data, sizeof(data)) < 0 && errno!=EPIPE) ERR("write:");
-                }
-                else // max. clients reached. don't add new client, send info msg.
-                {
-                    if (bulk_write(cfd, full, sizeof(full)) < 0 && errno!=EPIPE) ERR("write:");
-                    fprintf(stderr, "Client connection request refused.\n");
-    				if (TEMP_FAILURE_RETRY(close(cfd)) < 0) ERR("close");
-                }                
+				if (cons < 3)
+				{
+					int added = 0;
+					for (int i = 0; i < BACKLOG; i++) 
+					{
+						if (con[i] == -1)
+						{
+							con[i] = cfd;
+							FD_SET(cfd, &base_rfds);
+							added = 1;
+							fprintf(stderr, "Client connected. [%d]\n", ++cons);
+							break;
+						}
+					}
+					if (!added) ERR("Connection add error");
+					
+					if(bulk_write(cfd, data, sizeof(data)) < 0 && errno!=EPIPE) ERR("write:");
+				}
+				else // max. clients reached. don't add new client, send info msg.
+				{
+					if (bulk_write(cfd, full, sizeof(full)) < 0 && errno!=EPIPE) ERR("write:");
+					fprintf(stderr, "Client connection request refused.\n");
+					if (TEMP_FAILURE_RETRY(close(cfd)) < 0) ERR("close");
+				}                
 			}            
-        }
-        else
-        {
-            if(EINTR==errno) continue;
-            ERR("pselect");
-        }
+		}
+		else
+		{
+			if(EINTR==errno) continue;
+			ERR("pselect");
+		}
 	}
 
-    fprintf(stderr, "SIGINT received.\n");
+	fprintf(stderr, "SIGINT received.\n");
 
-    // close open sockets
-    for (int i = 0; i < BACKLOG; i++) 
-    {
-        if (con[i] != -1)
-        {
-            if (TEMP_FAILURE_RETRY(close(con[i])) < 0) ERR("close");
-            fprintf(stderr, "Closing socket. [%d]\n", --cons);
-        }
-    }
+	// close open sockets
+	for (int i = 0; i < BACKLOG; i++) 
+	{
+		if (con[i] != -1)
+		{
+			if (TEMP_FAILURE_RETRY(close(con[i])) < 0) ERR("close");
+			fprintf(stderr, "Closing socket. [%d]\n", --cons);
+		}
+	}
 
 	sigprocmask (SIG_UNBLOCK, &mask, NULL);
 }
@@ -207,11 +207,11 @@ int main(int argc, char** argv)
 	int fdT;
 	int new_flags;
 	
-    if(argc!=2) 
-    {
+	if(argc!=2) 
+	{
 		usage(argv[0]);
 		return EXIT_FAILURE;
-    }
+	}
 
 	if(sethandler(SIG_IGN,SIGPIPE)) ERR("Seting SIGPIPE:");
 	if(sethandler(sigint_handler,SIGINT)) ERR("Seting SIGINT:");
@@ -227,7 +227,7 @@ int main(int argc, char** argv)
 	doServer(fdT);
 	
 	if (TEMP_FAILURE_RETRY(close(fdT)) < 0) ERR("close");
-    fprintf(stderr, "Closing listening socket.\n");
+	fprintf(stderr, "Closing listening socket.\n");
 	fprintf(stderr, "Server has terminated.\n");
 	return EXIT_SUCCESS;
 }
