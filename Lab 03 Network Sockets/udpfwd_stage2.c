@@ -1,4 +1,5 @@
 #define _GNU_SOURCE 
+#include <sys/select.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -12,6 +13,7 @@
 #include <signal.h>
 #include <netdb.h>
 #include <fcntl.h>
+#define HERE puts("**************** HERE ***************")
 #define ERR(source) (perror(source),\
 		fprintf(stderr,"%s:%d\n",__FILE__,__LINE__),\
 		exit(EXIT_FAILURE))
@@ -112,9 +114,9 @@ ssize_t bulk_write(int fd, char *buf, size_t count){
 void doServer(int fdT)
 {
 	int cfd, cons=0;
-	fd_set base_rfds, rfds;
+	fd_set base_rfds, rfds, efds;
 	sigset_t mask, oldmask;
-    char data[] = "hello world\n";
+    char data[] = "Hello message\n";
     char full[] = "Max no of clients reached. Connection not accepted.\n";
     char buf[10];
     int con[BACKLOG];
@@ -127,34 +129,35 @@ void doServer(int fdT)
 	// set signal mask for pselect
 	sigemptyset (&mask);
 	sigaddset (&mask, SIGINT);
-	sigprocmask (SIG_BLOCK, &mask, &oldmask);
-
-    //ssize_t x = recv(A_sock, &c, 1, MSG_PEEK);
+	sigprocmask (SIG_BLOCK, &mask, &oldmask);    
 	
 	while(do_work)
     {
-		rfds=base_rfds;
+		rfds = base_rfds;
 		
-		if (pselect(fdT+1, &rfds, NULL, NULL, NULL, &oldmask) > 0)
+		if (pselect(FD_SETSIZE, &rfds, NULL, NULL, NULL, &oldmask) > 0)
         {
+            fprintf(stderr, "PSELECT Active connections: %d.\n", cons);
+            
             // check for client disconnects
-            for (int i = 0; i < BACKLOG; i++) 
+            for (int i = 0; i < BACKLOG; i++)
             {
                 // if recv() call returns zero, it means the connection is closed on the other side
-                if (recv(con[i], buf, sizeof(buf), MSG_PEEK | MSG_DONTWAIT) == 0) 
+                if (FD_ISSET(con[i], &rfds) && recv(con[i], buf, sizeof(buf), MSG_PEEK) == 0) 
                 {
                     if (TEMP_FAILURE_RETRY(close(con[i])) < 0) ERR("close");
-                    fprintf(stderr, "client disconnected closing socket.\n");
+                    fprintf(stderr, "Client disconnected closing socket.\n");
+                    FD_CLR(con[i], &base_rfds);
                     con[i] = -1;
                     cons--;
                 }
             }
             
-            // new client connection
-            if ((cfd = add_new_client(fdT)) > 0)
+            //  new client connection
+            if (FD_ISSET(fdT, &rfds) && (cfd = add_new_client(fdT)) > 0)
             {
 				// if less than 3 clients add new client
-                if(cons < 3)
+                if (cons < 3)
                 {
                     cons++;
                     
@@ -164,8 +167,9 @@ void doServer(int fdT)
                         if (con[i] == -1)
                         {
                             con[i] = cfd;
+                            FD_SET(cfd, &base_rfds);
                             added = 1;
-                            fprintf(stderr, "client connected.\n");
+                            fprintf(stderr, "Client connected.\n");
                             break;
                         }
                     }
@@ -173,22 +177,22 @@ void doServer(int fdT)
                     
                     if(bulk_write(cfd, data, sizeof(data)) < 0 && errno!=EPIPE) ERR("write:");
                 }
-                else // don't add new client, send info msg.
+                else // max. clients reached. don't add new client, send info msg.
                 {
                     if (bulk_write(cfd, full, sizeof(full)) < 0 && errno!=EPIPE) ERR("write:");
-                    fprintf(stderr, "client connection request refused.\n");
+                    fprintf(stderr, "Client connection request refused.\n");
     				if (TEMP_FAILURE_RETRY(close(cfd)) < 0) ERR("close");
-                }
-			}
-            else
-            {
-                if(EINTR==errno) continue;
-                ERR("pselect");
-            }
+                }                
+			}            
+        }
+        else
+        {
+            if(EINTR==errno) continue;
+            ERR("pselect");
         }
 	}
 
-    perror("SIGINT received.\n");
+    fprintf(stderr, "SIGINT received.\n");
 
     // close open sockets
     for (int i = 0; i < BACKLOG; i++) 
@@ -196,11 +200,9 @@ void doServer(int fdT)
         if (con[i] != -1)
         {
             if (TEMP_FAILURE_RETRY(close(con[i])) < 0) ERR("close");
-            perror("closed socket.\n");
+            fprintf(stderr, "Closing socket.\n");
         }
     }
-
-
 
 	sigprocmask (SIG_UNBLOCK, &mask, NULL);
 }
@@ -230,6 +232,7 @@ int main(int argc, char** argv)
 	doServer(fdT);
 	
 	if (TEMP_FAILURE_RETRY(close(fdT)) < 0) ERR("close");
+    fprintf(stderr, "Closing listening socket.\n");
 	fprintf(stderr, "Server has terminated.\n");
 	return EXIT_SUCCESS;
 }
