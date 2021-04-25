@@ -113,37 +113,31 @@ ssize_t bulk_write(int fd, char *buf, size_t count){
 
 int process_msg(char* msg)
 {
-	char *token, *subtoken, *str1, *str2;
+	char *token, *subtoken, *str;
 	char *saveptr1, *saveptr2;
-	char space = ' ';
-	char column = ':';
-	char fwd[] = "fwd";
-	char close[] = "close";
-	char show[] = "show";
 	int i = 0;
 	
-	str1 = msg;
-	token = strtok_r(str1, &space, &saveptr1);
+	token = strtok_r(msg, " ", &saveptr1);
 
-	if (strcmp(token, fwd) == 0)
+	if (strcmp(token, "fwd") == 0)
 	{
 		// stage 4
 		fprintf(stderr, "FWD = %s\n", token);
 
 		while(1)
 		{
-			token = strtok_r(NULL, &space, &saveptr1);
+			token = strtok_r(NULL, " ", &saveptr1);
 			if (token == NULL) break;
 
 			fprintf(stderr, "%d = %s\n", ++i, token);
 
-			// for (str2 = token; ; str2 = NULL) 
-			// {
-			// 	subtoken = strtok_r(str2, &column, &saveptr2);
-			// 	if (subtoken == NULL)
-			// 		break;
-			// 	printf(" --> %s\n", subtoken);
-			// }
+			for (str = token; ; str = NULL) 
+			{
+				subtoken = strtok_r(str, ":", &saveptr2);
+				if (subtoken == NULL)
+					break;
+				printf(" --> %s\n", subtoken);
+			}
 
 			
 			
@@ -155,13 +149,13 @@ int process_msg(char* msg)
 
 		return 0;
 	}
-	else if (strcmp(token, close) == 0)
+	else if (strcmp(token, "close") == 0)
 	{
 		// stage 5
 		fprintf(stderr, "CLOSE = %s\n", token);
 		return 0;
 	}
-	else if(strcmp(token, show) == 0)
+	else if(strcmp(token, "show") == 0)
 	{
 		// stage 6
 		fprintf(stderr, "SHOW = %s\n", msg);
