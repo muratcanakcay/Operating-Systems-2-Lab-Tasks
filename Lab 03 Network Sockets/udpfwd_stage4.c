@@ -138,14 +138,7 @@ int process_msg(char* msg)
 					break;
 				printf(" --> %s\n", subtoken);
 			}
-
-			
-			
-			
-			
-			
 		}
-
 
 		return 0;
 	}
