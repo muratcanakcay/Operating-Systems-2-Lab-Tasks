@@ -154,8 +154,7 @@ int process_msg(char* msg)
 		fprintf(stderr, "SHOW = %s\n", msg);
 		return 0;
 	}
-	else return -1;
-	
+	else return -1;	
 }
 
 // pselect
