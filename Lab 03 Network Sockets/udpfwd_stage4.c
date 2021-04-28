@@ -14,13 +14,22 @@
 #include <netdb.h>
 #include <fcntl.h>
 #include <ctype.h>
+#include <stdbool.h>
 #define HERE puts("**************** HERE ***************")
+#define MAX_UDP 2
 #define ERR(source) (perror(source),\
         fprintf(stderr,"%s:%d\n",__FILE__,__LINE__),\
         exit(EXIT_FAILURE))
 
 #define BACKLOG 3
 volatile sig_atomic_t do_work=1;
+
+typedef struct udpfwd_t
+{
+	int fd;
+	struct sockaddr_in fwdlist[10];
+
+} udpfwd_t;
 
 void usage(char * name){
     fprintf(stderr,"USAGE: %s socket port\n",name);
@@ -47,22 +56,39 @@ int make_socket(int domain, int type){
     return sock;
 }
 
-// bind tcp socket
-int bind_tcp_socket(uint16_t port){
-    struct sockaddr_in addr;
-    int socketfd, t = 1;
-    
-    socketfd = make_socket(PF_INET,SOCK_STREAM);
-    memset(&addr, 0, sizeof(struct sockaddr_in));
+// make address
+struct sockaddr_in make_address(char *address, char *port){
+	int ret;
+	struct sockaddr_in addr;
+	struct addrinfo *result;
+	struct addrinfo hints = {};
+	hints.ai_family = AF_INET;
+	if((ret=getaddrinfo(address,port, &hints, &result))){
+		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(ret));
+		exit(EXIT_FAILURE);
+	}
+	addr = *(struct sockaddr_in *)(result->ai_addr);
+	freeaddrinfo(result);
+	return addr;
+}
 
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    
-    if (setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR, &t, sizeof(t))) ERR("setsockopt");
-    if (bind(socketfd,(struct sockaddr*) &addr,sizeof(addr)) < 0) ERR("bind");
-    if (listen(socketfd, BACKLOG) < 0) ERR("listen");
-    return socketfd;
+// bind internet socket
+int bind_inet_socket(uint16_t port, int type){
+	struct sockaddr_in addr;
+	int socketfd, t = 1;
+	
+	socketfd = make_socket(PF_INET,type);
+	memset(&addr, 0, sizeof(struct sockaddr_in));
+	
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(port);
+	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	
+	if (setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR, &t, sizeof(t))) ERR("setsockopt");
+	if(bind(socketfd,(struct sockaddr*) &addr,sizeof(addr)) < 0)  ERR("bind");
+	if(SOCK_STREAM==type)
+		if(listen(socketfd, BACKLOG) < 0) ERR("listen");
+	return socketfd;
 }
 
 // accept connection
@@ -111,126 +137,153 @@ ssize_t bulk_write(int fd, char *buf, size_t count){
     return len;
 }
 
-int process_msg(char* msg)
+int process_fwd(char* token, char* saveptr1, udpfwd_t* udpfwdList)
 {
-	char *token, *subtoken, *subsubtoken, *str, *str2;
-	char *saveptr1, *saveptr2, *saveptr3;
-	int i, j, k, l;
+	char *subtoken, *subsubtoken, *str, *str2;
+	char *saveptr2, *saveptr3;
+	char fwdAddr[16];
+	char fwdPort[11];
+	int i, j, k, l, udpNo, fwdNo = 0;
+	
+	fprintf(stderr, "FWD = %s\n", token);
+
+	// check if MAX_UDP limit is reached
+	for (udpNo = 0; udpNo < MAX_UDP; udpNo++)
+		if (udpfwdList[udpNo].fd == -1) break;
+	
+	if (udpNo == MAX_UDP) 
+	{
+		fprintf(stderr, "UDP rule limit reached!\n");
+		return -1;
+	}
+
+	// get port number to listen at
+	token = strtok_r(NULL, " ", &saveptr1);
+	
+	//check port number is ok
+	for (j = 0; j<strlen(token); j++)
+	{
+		if (!isdigit(token[j]))
+		{
+			fprintf(stderr, "Error in listening port number!\n");
+			return -1;
+		}
+	}
+
+	
+	fprintf(stderr, "Listen port: %s\n", token);
+	udpfwdList[udpNo].fd = bind_inet_socket(atoi(token), SOCK_DGRAM);
+
+
+	// get ip:port to forward to
+	while(1)
+	{
+		token = strtok_r(NULL, " ", &saveptr1);
+		if (token == NULL) break;
+
+		// ip:port
+		fprintf(stderr, "[%d] ip:port = %s\n", ++i, token);
+
+		for (j = 0, str = token; ;j++, str = NULL) 
+		{
+			subtoken = strtok_r(str, ":", &saveptr2);
+			if (subtoken == NULL)
+				break;
+
+			// check ip:port has only 2 segments
+			if(j >= 2) 
+			{
+				fprintf(stderr, "Error in ip:port!\n");
+				return -1;
+			}
+
+			// check port format
+			if (j == 1)
+			{	
+				for (k = 0; k < strlen(subtoken); k++)
+				{
+					if (!isdigit(subtoken[k]))
+					{
+						fprintf(stderr, "Error in ip:port - port is not a number!\n");
+						return -1;
+					}
+				}
+
+				strncpy(fwdPort, subtoken, strlen(subtoken));
+				printf(" PORT --> %s\n", fwdPort);
+			}
+
+			//check ip format
+			if (j == 0)
+			{
+				for (k = 0, str2 = subtoken; ;k++, str2 = NULL) 
+				{
+					subsubtoken = strtok_r(str2, ".", &saveptr3);
+					if (subsubtoken == NULL)
+						break;
+					
+					// check ip has 4 segments
+					if(k >= 4) 
+					{
+						fprintf(stderr, "Error in ip:port - ip has more than 4 parts!\n");
+						return -1;
+					}
+
+					// check each segment is a number
+					for (l = 0; l < strlen(subsubtoken); l++)
+					{
+						if (!isdigit(subsubtoken[l]))
+						{
+							fprintf(stderr, "Error in ip:port - part of ip is not a number!\n");
+							return -1;
+						}
+					}
+
+					// check each segment is < 256
+					
+					if (strtol(subsubtoken, NULL, 10) > 255)
+					{
+						fprintf(stderr, "Error in ip:port - part of ip is greater than 255!\n");
+						return -1;
+					}					
+
+					printf("      --> %s\n", subsubtoken);
+				}
+
+				if(k < 4) 
+				{
+					fprintf(stderr, "Error in ip:port - ip has less than 4 parts!\n");
+					return -1;
+				}
+
+				strncpy(fwdAddr, subtoken, strlen(subtoken));
+				printf(" IP   --> %s\n", fwdAddr);
+			}
+		}
+
+		if(j < 2) 
+		{
+			fprintf(stderr, "Error in ip:port - one argument missing!\n");
+			return -1;
+		}
+
+		// ip:port has no errors, make address add to list		
+		udpfwdList->fwdlist[fwdNo++] = make_address(fwdAddr, fwdPort);
+	}
+
+	return 0;
+}
+
+int process_msg(char* msg, udpfwd_t* udpfwdList)
+{
+	char *token, *saveptr1;
 	
 	token = strtok_r(msg, " ", &saveptr1);
 
 	if (strcmp(token, "fwd") == 0)
 	{
 		// stage 4
-		fprintf(stderr, "FWD = %s\n", token);
-
-		// get port to open
-		token = strtok_r(NULL, " ", &saveptr1);
-		for (j = 0; j<strlen(token); j++)
-		{
-			if (!isdigit(token[j]))
-			{
-				fprintf(stderr, "Error in listening port number!\n");
-				return -1;
-			}
-		}
-
-		fprintf(stderr, "Port number: %s\n", token);
-
-		// get ip:port to forward to
-		while(1)
-		{
-			token = strtok_r(NULL, " ", &saveptr1);
-			if (token == NULL) break;
-
-			// ip:port
-			fprintf(stderr, "[%d] ip:port = %s\n", ++i, token);
-
-			for (j = 0, str = token; ;j++, str = NULL) 
-			{
-				subtoken = strtok_r(str, ":", &saveptr2);
-				if (subtoken == NULL)
-					break;
-
-				// ip:port format wrong (more than 2 tokens) 
-				if(j >= 2) 
-				{
-					fprintf(stderr, "Error in ip:port!\n");
-					return -1;
-				}
-
-				if (j == 0)				
-				printf(" IP --> %s\n", subtoken);
-				if (j == 1)				
-				printf(" PORT --> %s\n", subtoken);
-				
-				
-				// check port format
-				if (j == 1)
-				{	
-					for (k = 0; k < strlen(subtoken); k++)
-					{
-						if (!isdigit(subtoken[k]))
-						{
-							fprintf(stderr, "Error in ip:port - port is not a number!\n");
-							return -1;
-						}
-					
-					}
-				}
-
-				//check ip format
-				if (j == 0)
-				{
-					for (k = 0, str2 = subtoken; ;k++, str2 = NULL) 
-					{
-						subsubtoken = strtok_r(str2, ".", &saveptr3);
-						if (subsubtoken == NULL)
-							break;
-						
-						// ip:port format wrong (more than 4 tokens) 
-						if(k >= 4) 
-						{
-							fprintf(stderr, "Error in ip:port - ip has more than 4 parts!\n");
-							return -1;
-						}
-
-						// ip:port format wrong (port not a number) 
-						for (l = 0; l < strlen(subsubtoken); l++)
-						{
-							if (!isdigit(subsubtoken[l]))
-							{
-								fprintf(stderr, "Error in ip:port - part of ip is not a number!\n");
-								return -1;
-							}
-						}
-
-						// ip:port format wrong (port not a number) 
-						
-						if (strtol(subsubtoken, NULL, 10) > 255)
-						{
-							fprintf(stderr, "Error in ip:port - part of ip is greater than 255!\n");
-							return -1;
-						}					
-
-						printf("    --> %s\n", subsubtoken);
-					}
-
-					if(k < 4) 
-					{
-						fprintf(stderr, "Error in ip:port - ip has less than 4 parts!\n");
-						return -1;
-					}
-				}
-			}
-
-			if(j < 2) 
-			{
-				fprintf(stderr, "Error in ip:port - one argument missing!\n");
-				return -1;
-			}
-		}
-
+		if(process_fwd(token, saveptr1, udpfwdList) < -1) return -1;
 		return 0;
 	}
 	else if (strcmp(token, "close") == 0)
@@ -260,6 +313,9 @@ void doServer(int fdT)
     char buf[256];
     int con[BACKLOG];
     for (int i = 0; i < BACKLOG; i++) con[i] = -1;
+	
+	udpfwd_t udpfwdList[MAX_UDP];
+	for (int i = 0; i < MAX_UDP; i++) udpfwdList[i].fd = -1;
     
     // set base_rfds once and use in the loop to reset rfds
     FD_ZERO(&base_rfds);
@@ -298,7 +354,7 @@ void doServer(int fdT)
 						
 						//fprintf(stderr, "RECEIVED: %s\n", buf);
 						
-						if (process_msg(buf) < 0) // if unrecognized format
+						if (process_msg(buf, udpfwdList) < 0) // if unrecognized format
 						{
 							if(bulk_write(con[i], msgerror, sizeof(msgerror)) < 0 && errno!=EPIPE) ERR("write:");
 						}
@@ -358,7 +414,7 @@ void doServer(int fdT)
     sigprocmask (SIG_UNBLOCK, &mask, NULL);
 }
 
-int main(int argc, char** argv) 
+int main(int argc, char** argv)
 {
     int fdT;
     int new_flags;
@@ -373,7 +429,7 @@ int main(int argc, char** argv)
     if(sethandler(sigint_handler,SIGINT)) ERR("Seting SIGINT:");
     
     // make and bind tcp socket
-    fdT=bind_tcp_socket(atoi(argv[1]));
+    fdT=bind_inet_socket(atoi(argv[1]), SOCK_STREAM);
     
     // set tcp socket to nonblocking
     new_flags = fcntl(fdT, F_GETFL) | O_NONBLOCK;
