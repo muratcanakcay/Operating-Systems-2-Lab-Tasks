@@ -113,9 +113,9 @@ ssize_t bulk_write(int fd, char *buf, size_t count){
 
 int process_msg(char* msg)
 {
-	char *token, *subtoken, *str;
-	char *saveptr1, *saveptr2;
-	int i = 0;
+	char *token, *subtoken, *subsubtoken, *str, *str2;
+	char *saveptr1, *saveptr2, *saveptr3;
+	int i, j, k, l;
 	
 	token = strtok_r(msg, " ", &saveptr1);
 
@@ -126,31 +126,108 @@ int process_msg(char* msg)
 
 		// get port to open
 		token = strtok_r(NULL, " ", &saveptr1);
-		for (int j = 0; j<strlen(token); j++)
+		for (j = 0; j<strlen(token); j++)
 		{
-			if (!isdigit(token[j])) 
+			if (!isdigit(token[j]))
 			{
-				fprintf(stderr, "Error in port number!\n");
+				fprintf(stderr, "Error in listening port number!\n");
 				return -1;
 			}
 		}
 
 		fprintf(stderr, "Port number: %s\n", token);
 
+		// get ip:port to forward to
 		while(1)
 		{
 			token = strtok_r(NULL, " ", &saveptr1);
 			if (token == NULL) break;
 
-			// ip
-			fprintf(stderr, "%d = %s\n", ++i, token);
+			// ip:port
+			fprintf(stderr, "[%d] ip:port = %s\n", ++i, token);
 
-			for (str = token; ;str = NULL) 
+			for (j = 0, str = token; ;j++, str = NULL) 
 			{
 				subtoken = strtok_r(str, ":", &saveptr2);
 				if (subtoken == NULL)
 					break;
-				printf(" --> %s\n", subtoken);
+
+				// ip:port format wrong (more than 2 tokens) 
+				if(j >= 2) 
+				{
+					fprintf(stderr, "Error in ip:port!\n");
+					return -1;
+				}
+
+				if (j == 0)				
+				printf(" IP --> %s\n", subtoken);
+				if (j == 1)				
+				printf(" PORT --> %s\n", subtoken);
+				
+				
+				// check port format
+				if (j == 1)
+				{	
+					for (k = 0; k < strlen(subtoken); k++)
+					{
+						if (!isdigit(subtoken[k]))
+						{
+							fprintf(stderr, "Error in ip:port - port is not a number!\n");
+							return -1;
+						}
+					
+					}
+				}
+
+				//check ip format
+				if (j == 0)
+				{
+					for (k = 0, str2 = subtoken; ;k++, str2 = NULL) 
+					{
+						subsubtoken = strtok_r(str2, ".", &saveptr3);
+						if (subsubtoken == NULL)
+							break;
+						
+						// ip:port format wrong (more than 4 tokens) 
+						if(k >= 4) 
+						{
+							fprintf(stderr, "Error in ip:port - ip has more than 4 parts!\n");
+							return -1;
+						}
+
+						// ip:port format wrong (port not a number) 
+						for (l = 0; l < strlen(subsubtoken); l++)
+						{
+							if (!isdigit(subsubtoken[l]))
+							{
+								fprintf(stderr, "Error in ip:port - part of ip is not a number!\n");
+								return -1;
+							}
+						}
+
+						// ip:port format wrong (port not a number) 
+						
+						if (strtol(subsubtoken, NULL, 10) > 255)
+						{
+							fprintf(stderr, "Error in ip:port - part of ip is greater than 255!\n");
+							return -1;
+						}					
+
+						printf("    --> %s\n", subsubtoken);
+					}
+
+					if(k < 4) 
+					{
+						fprintf(stderr, "Error in ip:port - ip has less than 4 parts!\n");
+						return -1;
+					}
+				}
+			}
+
+			if(j < 2) 
+			{
+				fprintf(stderr, "Error in ip:port - one argument missing!\n");
+				return -1;
 			}
 		}
 
