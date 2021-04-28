@@ -124,14 +124,28 @@ int process_msg(char* msg)
 		// stage 4
 		fprintf(stderr, "FWD = %s\n", token);
 
+		// get port to open
+		token = strtok_r(NULL, " ", &saveptr1);
+		for (int j = 0; j<strlen(token); j++)
+		{
+			if (!isdigit(token[j])) 
+			{
+				fprintf(stderr, "Error in port number!\n");
+				return -1;
+			}
+		}
+
+		fprintf(stderr, "Port number: %s\n", token);
+
 		while(1)
 		{
 			token = strtok_r(NULL, " ", &saveptr1);
 			if (token == NULL) break;
 
+			// ip
 			fprintf(stderr, "%d = %s\n", ++i, token);
 
-			for (str = token; ; str = NULL) 
+			for (str = token; ;str = NULL) 
 			{
 				subtoken = strtok_r(str, ":", &saveptr2);
 				if (subtoken == NULL)
