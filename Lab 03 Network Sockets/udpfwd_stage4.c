@@ -17,6 +17,7 @@
 #include <stdbool.h>
 #define HERE puts("**************** HERE ***************")
 #define MAX_UDP 2
+#define MAX_TCP 2
 #define ERR(source) (perror(source),\
         fprintf(stderr,"%s:%d\n",__FILE__,__LINE__),\
         exit(EXIT_FAILURE))
@@ -137,12 +138,10 @@ ssize_t bulk_write(int fd, char *buf, size_t count){
     return len;
 }
 
-int process_fwd(char* token, char* saveptr1, udpfwd_t* udpfwdList)
+int process_fwd(char* token, char* saveptr1, udpfwd_t* udpfwdList, fd_set* base_rfds)
 {
-	char *subtoken, *subsubtoken, *str, *str2;
-	char *saveptr2, *saveptr3;
-	char fwdAddr[16];
-	char fwdPort[11];
+	char *subtoken, *subsubtoken, *str, *str2, *saveptr2, *saveptr3;
+	char fwdAddr[16], fwdPort[11], udpListen[11];
 	int i, j, k, l, udpNo, fwdNo = 0;
 	
 	fprintf(stderr, "FWD = %s\n", token);
@@ -170,10 +169,8 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpfwdList)
 		}
 	}
 
-	
-	fprintf(stderr, "Listen port: %s\n", token);
-	udpfwdList[udpNo].fd = bind_inet_socket(atoi(token), SOCK_DGRAM);
-
+	strncpy(udpListen, token, strlen(token));
+	fprintf(stderr, "Listen port: %s\n", udpListen);
 
 	// get ip:port to forward to
 	while(1)
@@ -267,14 +264,19 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpfwdList)
 			return -1;
 		}
 
-		// ip:port has no errors, make address add to list		
-		udpfwdList->fwdlist[fwdNo++] = make_address(fwdAddr, fwdPort);
+		// ip:port has no errors, make address add to forwarding list		
+		udpfwdList[udpNo].fwdlist[fwdNo++] = make_address(fwdAddr, fwdPort);
 	}
+
+	// open socket and udp and add udp to base_rfds
+	int udpFd = bind_inet_socket(atoi(udpListen), SOCK_DGRAM); 
+	udpfwdList[udpNo].fd = udpFd;
+	FD_SET(udpfwdList[udpNo].fd, base_rfds);
 
 	return 0;
 }
 
-int process_msg(char* msg, udpfwd_t* udpfwdList)
+int process_msg(char* msg, udpfwd_t* udpfwdList, fd_set* base_rfds)
 {
 	char *token, *saveptr1;
 	
@@ -283,7 +285,7 @@ int process_msg(char* msg, udpfwd_t* udpfwdList)
 	if (strcmp(token, "fwd") == 0)
 	{
 		// stage 4
-		if(process_fwd(token, saveptr1, udpfwdList) < -1) return -1;
+		if(process_fwd(token, saveptr1, udpfwdList, base_rfds) < -1) return -1;
 		return 0;
 	}
 	else if (strcmp(token, "close") == 0)
@@ -311,8 +313,8 @@ void doServer(int fdT)
     char full[] = "Max no of clients reached. Connection not accepted.\n";
 	char msgerror[] = "Unrecognized command.\n";
     char buf[256];
-    int con[BACKLOG];
-    for (int i = 0; i < BACKLOG; i++) con[i] = -1;
+    int con[MAX_TCP];
+    for (int i = 0; i < MAX_TCP; i++) con[i] = -1;
 	
 	udpfwd_t udpfwdList[MAX_UDP];
 	for (int i = 0; i < MAX_UDP; i++) udpfwdList[i].fd = -1;
@@ -333,7 +335,7 @@ void doServer(int fdT)
         if (pselect(FD_SETSIZE, &rfds, NULL, NULL, NULL, &oldmask) > 0)
         {
             // check for client disconnects
-            for (int i = 0; i < BACKLOG; i++)
+            for (int i = 0; i < MAX_TCP; i++)
             {
                 // if recv() call returns zero, it means the connection is closed on the other side
                 if (FD_ISSET(con[i], &rfds))
@@ -354,7 +356,7 @@ void doServer(int fdT)
 						
 						//fprintf(stderr, "RECEIVED: %s\n", buf);
 						
-						if (process_msg(buf, udpfwdList) < 0) // if unrecognized format
+						if (process_msg(buf, udpfwdList, &base_rfds) < 0) // if unrecognized format
 						{
 							if(bulk_write(con[i], msgerror, sizeof(msgerror)) < 0 && errno!=EPIPE) ERR("write:");
 						}
