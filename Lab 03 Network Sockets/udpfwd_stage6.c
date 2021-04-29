@@ -133,7 +133,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
 {
     char *subtoken, *subsubtoken, *str, *str2, *saveptr2, *saveptr3;
     char fwdAddr[16] = "", fwdPort[5] = "", udpListen[5] = "";
-    int i = 0, j = 0, k = 0, l = 0, udpNo = 0, fwdNo = 0;
+    int i = 0, j = 0, k = 0, l = 0, m = 0, udpNo = 0, fwdNo = 0;
 
     // check if MAX_UDPLISTEN limit is reached
     for (udpNo = 0; udpNo < MAX_UDPLISTEN; udpNo++)
@@ -231,8 +231,21 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
             if (j == 0)
             {
                 strncpy(fwdAddr, subtoken, strlen(subtoken));
-                printf(" IP   --> %s\n", fwdAddr);
+                printf("IP   --> %s\n", fwdAddr);
 
+                if (fwdAddr[0] == '.' || fwdAddr[strlen(fwdAddr)] == '.') 
+				{
+					fprintf(stderr, "IP address format wrong.");
+					return -1;
+				}
+				
+				for(m = 1; m < strlen(fwdAddr) - 2; m++)
+				{
+					if (fwdAddr[m] != '.' || fwdAddr[m+1] != '.') continue;
+					fprintf(stderr, "IP address format wrong.");
+					return -1;
+				}
+                
                 for (k = 0, str2 = subtoken; ;k++, str2 = NULL) 
                 {
                     subsubtoken = strtok_r(str2, ".", &saveptr3);
@@ -439,7 +452,7 @@ void doServer(int fdT)
                     //receive udp message
                     if((ret = recv(udpFwdList[i].fd, buf, MAXBUF, 0)) < 0) ERR("udp read");
                     buf[ret] = '\0';
-                    fprintf(stderr, "%s", buf);
+                    fprintf(stderr, "%s\n", buf);
 
                     // forward udp message
                     for (int j = 0; j < udpFwdList[i].fwdCount; j++)
