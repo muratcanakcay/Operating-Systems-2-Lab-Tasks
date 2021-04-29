@@ -19,7 +19,7 @@
 #define MAX_UDPLISTEN 2
 #define MAX_UDPFWD 10
 #define MAX_TCP 2
-#define MAXBUF 10
+#define MAXBUF 65507
 #define ERR(source) (perror(source),\
         fprintf(stderr,"%s:%d\n",__FILE__,__LINE__),\
         exit(EXIT_FAILURE))
@@ -325,11 +325,10 @@ void doServer(int fdT)
     int cfd, ret, cons=0;
     fd_set base_rfds, rfds;
     sigset_t mask, oldmask;
-    char data[] = "Hello message\n";
+    char hello[] = "Hello message\n";
     char full[] = "Max no of clients reached. Connection not accepted.\n";
 	char msgerror[] = "Unrecognized command.\n";
-    char buf[576];
-	char buf2[65507];
+    char buf[MAXBUF];
     int con[MAX_TCP];
     for (int i = 0; i < MAX_TCP; i++) con[i] = -1;
 	
@@ -345,7 +344,7 @@ void doServer(int fdT)
     sigaddset (&mask, SIGINT);
     sigprocmask (SIG_BLOCK, &mask, &oldmask);
 
-	int udpSendFd = make_socket(PF_INET, SOCK_DGRAM);
+	int fdU = make_socket(PF_INET, SOCK_DGRAM);
     
     while(do_work)
     {
@@ -356,12 +355,12 @@ void doServer(int fdT)
             // check for client disconnects
             for (int i = 0; i < MAX_TCP; i++)
             {
-                memset(buf, 0, sizeof(buf));
+                memset(buf, 0, MAXBUF);
 				
 				// if recv() call returns zero, it means the connection is closed on the other side
                 if (FD_ISSET(con[i], &rfds))
 				{
-					if(recv(con[i], buf, sizeof(buf), MSG_PEEK) == 0) 
+					if(recv(con[i], buf, MAXBUF, MSG_PEEK) == 0) 
 					{
 						fprintf(stderr, "Client disconnected. Closing socket. [%d left]\n", --cons);
 						con[i] = -1;
@@ -370,7 +369,7 @@ void doServer(int fdT)
 					}
 					else 
 					{
-						ret = recv(con[i], buf, sizeof(buf), 0);
+						ret = recv(con[i], buf, MAXBUF, 0);
 						if (ret < 0) ERR("recv"); 
 
 						buf[ret-2] = '\0'; // remove endline char
@@ -388,20 +387,20 @@ void doServer(int fdT)
 			// check for incoming udp 
 			for (int i = 0; i < MAX_UDPLISTEN; i++)
             {
-                memset(buf2, 0, sizeof(buf2));
+                memset(buf, 0, sizeof(buf));
 				
 				if (FD_ISSET(udpfwdList[i].fd, &rfds))
 				{
 					//receive udp message
-					if((ret = recv(udpfwdList[i].fd, buf2, MAXBUF, 0)) < 0) ERR("udp read");
-					buf2[ret-1] = '\0'; // remove endline char
-					fprintf(stderr, "%s\n", buf2);
+					if((ret = recv(udpfwdList[i].fd, buf, MAXBUF, 0)) < 0) ERR("udp read");
+					buf[ret] = '\0';
+					fprintf(stderr, "%s\n", buf);
 
 					// forward udp message
 					for (int j = 0; j < udpfwdList[i].fwdCount; j++)
 					{
 						fprintf(stderr, "fwdCount:%d/%d\n", j+1, udpfwdList[i].fwdCount);
-						if(TEMP_FAILURE_RETRY(sendto(udpSendFd, buf2, sizeof(buf2), 0, (struct sockaddr *)&udpfwdList[i].fwdList[j], sizeof(udpfwdList[i].fwdList[j]))) <0 ) ERR("sendto:");
+						if(TEMP_FAILURE_RETRY(sendto(fdU, buf, sizeof(buf), 0, &udpfwdList[i].fwdList[j], sizeof(udpfwdList[i].fwdList[j]))) <0 ) ERR("sendto:");
 					}
 					
 				}
@@ -427,7 +426,7 @@ void doServer(int fdT)
                     }
                     if (!added) ERR("Connection add error");
                     
-                    if(bulk_write(cfd, data, sizeof(data)) < 0 && errno!=EPIPE) ERR("write:");
+                    if(bulk_write(cfd, hello, sizeof(hello)) < 0 && errno!=EPIPE) ERR("write:");
                 }
                 else // max. clients reached. don't add new client, send info msg.
                 {
@@ -452,11 +451,11 @@ void doServer(int fdT)
         if (con[i] != -1)
         {
             if (TEMP_FAILURE_RETRY(close(con[i])) < 0) ERR("close");
-            fprintf(stderr, "Closing socket. [%d left]\n", --cons);
+            fprintf(stderr, "Closing tcp send socket. [%d left]\n", --cons);
         }
     }
 
-	if(TEMP_FAILURE_RETRY(close(udpSendFd))<0)ERR("close");
+	if(TEMP_FAILURE_RETRY(close(fdU))<0)ERR("close");
 	fprintf(stderr, "Closing udp send socket.\n");
 
     sigprocmask (SIG_UNBLOCK, &mask, NULL);
@@ -485,11 +484,9 @@ int main(int argc, char** argv)
     
     // accept connections and read data
     doServer(fdT);
-
-	// scanf("%[^\n]%*c", toSend);
     
     if (TEMP_FAILURE_RETRY(close(fdT)) < 0) ERR("close");
-    fprintf(stderr, "Closing listening socket.\n");
+    fprintf(stderr, "Closing tcp listening socket.\n");
     fprintf(stderr, "Server has terminated.\n");
     return EXIT_SUCCESS;
 }
