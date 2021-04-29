@@ -31,9 +31,9 @@ typedef struct udpfwd_t
 {
     int fd;
     int fwdCount;
-    char* port;
-    char* fwdAddr[MAX_UDPFWD];
-    char* fwdPort[MAX_UDPFWD];
+    char port[5];
+    char fwdAddr[MAX_UDPFWD][16]; 	// IPv4 address can be at most 16 bits (including periods)
+    char fwdPort[MAX_UDPFWD][5];	// Port number can be at most 65535 = 5 chars
     struct sockaddr_in fwdList[MAX_UDPFWD];
 
 } udpfwd_t;
@@ -132,8 +132,8 @@ ssize_t bulk_write(int fd, char *buf, size_t count){
 int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_rfds)
 {
     char *subtoken, *subsubtoken, *str, *str2, *saveptr2, *saveptr3;
-    char fwdAddr[16], fwdPort[11], udpListen[11];
-    int i, j, k, l, udpNo, fwdNo = 0;
+    char fwdAddr[16] = "", fwdPort[5] = "", udpListen[5] = "";
+    int i = 0, j = 0, k = 0, l = 0, udpNo = 0, fwdNo = 0;
 
     // check if MAX_UDPLISTEN limit is reached
     for (udpNo = 0; udpNo < MAX_UDPLISTEN; udpNo++)
@@ -160,12 +160,19 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
         return -1;
     }
 
+	if (atoi(token) > 65535)
+	{
+		fprintf(stderr, "udp listen port number cannot be larger than 65535!\n");
+        return -1;
+	}
+
     strncpy(udpListen, token, strlen(token));
     fprintf(stderr, "Listen port: -%s-\n", udpListen);
 
     for (j = 0; j < MAX_UDPLISTEN; j++)
     {
-        if (udpFwdList[j].fd == -1 || atoi(udpListen) != atoi(udpFwdList[j].port)) continue;
+        if (udpFwdList[j].fd != -1) fprintf(stderr, "%d, %s \n", j, udpFwdList[j].port);
+		if (udpFwdList[j].fd == -1 || atoi(udpListen) != atoi(udpFwdList[j].port)) continue;
         fprintf(stderr, "There's already a rule defined for this port! Close it first.\n");
         return -1;
     }
@@ -209,6 +216,12 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
                         return -1;
                     }
                 }
+
+				if (atoi(token) > 65535)
+				{
+					fprintf(stderr, "udp listen port number cannot be larger than 65535!\n");
+					return -1;
+				}
 
                 strncpy(fwdPort, subtoken, strlen(subtoken));
                 printf(" PORT --> %s\n", fwdPort);
@@ -268,10 +281,12 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
             return -1;
         }
 
-        // ip:port has no errors, make address add to forwarding list		
+        // ip:port has no errors, make address and add to forwarding list		
         printf("[%d] %s:%s\n", fwdNo, fwdAddr, fwdPort);
         udpFwdList[udpNo].fwdList[fwdNo++] = make_address(fwdAddr, fwdPort);
-        udpFwdList[udpNo].port = udpListen;
+		strncpy(udpFwdList[udpNo].port, udpListen, 5);
+		strncpy(udpFwdList[udpNo].fwdAddr[fwdNo], fwdAddr, 16);
+		strncpy(udpFwdList[udpNo].fwdPort[fwdNo], fwdPort, 5) ;
         udpFwdList[udpNo].fwdCount = fwdNo;
     }
 
@@ -287,8 +302,8 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
 
 int process_close(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_rfds)
 {
-    int j;
-    char udpListen[11];
+    int j = 0;
+    char udpListen[5] = "";
 
     // get port number to close
     if ((token = strtok_r(NULL, " ", &saveptr1)) == NULL)
@@ -307,13 +322,6 @@ int process_close(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* bas
 
     strncpy(udpListen, token, strlen(token));
     fprintf(stderr, "Listen port to close: -%s-\n", udpListen);
-
-    for (j = 0; j < MAX_UDPLISTEN; j++)
-    {
-        if (udpFwdList[j].fd == -1 || atoi(udpListen) != atoi(udpFwdList[j].port)) continue;
-        fprintf(stderr, "There's already a rule defined for this port! Close it first.\n");
-        return -1;
-    }
     
     for (j = 0; j < MAX_UDPLISTEN; j++)
     {
@@ -411,7 +419,7 @@ void doServer(int fdT)
                         if ((ret = recv(tcpCon[i], buf, MAXBUF, 0)) < 0) ERR("recv"); 
                         buf[ret-2] = '\0'; // remove endline char
                         
-                        fprintf(stderr, "RECEIVED: --%s--\n with size %d", buf, ret);
+                        fprintf(stderr, "RECEIVED: --%s-- with size %d\n", buf, ret);
                         
                         if (process_msg(buf, udpFwdList, &base_rfds) < 0) // if unrecognized format
                         {
