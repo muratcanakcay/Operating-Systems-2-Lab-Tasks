@@ -322,7 +322,7 @@ int process_msg(char* msg, udpfwd_t* udpfwdList, fd_set* base_rfds)
 // pselect
 void doServer(int fdT)
 {
-    int cfd, cons=0;
+    int cfd, ret, cons=0;
     fd_set base_rfds, rfds;
     sigset_t mask, oldmask;
     char data[] = "Hello message\n";
@@ -343,7 +343,9 @@ void doServer(int fdT)
     // set signal mask for pselect
     sigemptyset (&mask);
     sigaddset (&mask, SIGINT);
-    sigprocmask (SIG_BLOCK, &mask, &oldmask);    
+    sigprocmask (SIG_BLOCK, &mask, &oldmask);
+
+	int udpSendFd = make_socket(PF_INET, SOCK_DGRAM);
     
     while(do_work)
     {
@@ -354,7 +356,9 @@ void doServer(int fdT)
             // check for client disconnects
             for (int i = 0; i < MAX_TCP; i++)
             {
-                // if recv() call returns zero, it means the connection is closed on the other side
+                memset(buf, 0, sizeof(buf));
+				
+				// if recv() call returns zero, it means the connection is closed on the other side
                 if (FD_ISSET(con[i], &rfds))
 				{
 					if(recv(con[i], buf, sizeof(buf), MSG_PEEK) == 0) 
@@ -366,12 +370,12 @@ void doServer(int fdT)
 					}
 					else 
 					{
-						int ret = recv(con[i], buf, sizeof(buf), 0);
+						ret = recv(con[i], buf, sizeof(buf), 0);
 						if (ret < 0) ERR("recv"); 
 
 						buf[ret-2] = '\0'; // remove endline char
 						
-						//fprintf(stderr, "RECEIVED: %s\n", buf);
+						fprintf(stderr, "RECEIVED: --%s--\n", buf);
 						
 						if (process_msg(buf, udpfwdList, &base_rfds) < 0) // if unrecognized format
 						{
@@ -384,20 +388,22 @@ void doServer(int fdT)
 			// check for incoming udp 
 			for (int i = 0; i < MAX_UDPLISTEN; i++)
             {
-                if (FD_ISSET(udpfwdList[i].fd, &rfds))
+                memset(buf2, 0, sizeof(buf2));
+				
+				if (FD_ISSET(udpfwdList[i].fd, &rfds))
 				{
 					//receive udp message
-					if(recv(udpfwdList[i].fd, buf2, MAXBUF, 0) < 0) ERR("udp read");
-					fprintf(stderr, "%s", buf2);
+					if((ret = recv(udpfwdList[i].fd, buf2, MAXBUF, 0)) < 0) ERR("udp read");
+					buf2[ret-1] = '\0'; // remove endline char
+					fprintf(stderr, "%s\n", buf2);
 
 					// forward udp message
-					int fd = make_socket(PF_INET, SOCK_DGRAM);
 					for (int j = 0; j < udpfwdList[i].fwdCount; j++)
 					{
 						fprintf(stderr, "fwdCount:%d/%d\n", j+1, udpfwdList[i].fwdCount);
-						if(TEMP_FAILURE_RETRY(sendto(fd, buf2, sizeof(buf2), 0, (struct sockaddr *)&udpfwdList[i].fwdList[j], sizeof(udpfwdList[i].fwdList[j]))) <0 ) ERR("sendto:");
+						if(TEMP_FAILURE_RETRY(sendto(udpSendFd, buf2, sizeof(buf2), 0, (struct sockaddr *)&udpfwdList[i].fwdList[j], sizeof(udpfwdList[i].fwdList[j]))) <0 ) ERR("sendto:");
 					}
-					//if(TEMP_FAILURE_RETRY(close(fd))<0)ERR("close");
+					
 				}
 			}
             
@@ -449,6 +455,9 @@ void doServer(int fdT)
             fprintf(stderr, "Closing socket. [%d left]\n", --cons);
         }
     }
+
+	if(TEMP_FAILURE_RETRY(close(udpSendFd))<0)ERR("close");
+	fprintf(stderr, "Closing udp send socket.\n");
 
     sigprocmask (SIG_UNBLOCK, &mask, NULL);
 }
