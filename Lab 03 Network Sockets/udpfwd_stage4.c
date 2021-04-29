@@ -16,8 +16,10 @@
 #include <ctype.h>
 #include <stdbool.h>
 #define HERE puts("**************** HERE ***************")
-#define MAX_UDP 2
+#define MAX_UDPLISTEN 2
+#define MAX_UDPFWD 10
 #define MAX_TCP 2
+#define MAXBUF 576
 #define ERR(source) (perror(source),\
         fprintf(stderr,"%s:%d\n",__FILE__,__LINE__),\
         exit(EXIT_FAILURE))
@@ -28,7 +30,11 @@ volatile sig_atomic_t do_work=1;
 typedef struct udpfwd_t
 {
 	int fd;
-	struct sockaddr_in fwdlist[10];
+	char* port;
+	int fwdCount;
+	char* fwdAddr[MAX_UDPFWD];
+	char* fwdPort[MAX_UDPFWD];
+	struct sockaddr_in fwdList[MAX_UDPFWD];
 
 } udpfwd_t;
 
@@ -146,13 +152,19 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpfwdList, fd_set* base_
 	
 	fprintf(stderr, "FWD = %s\n", token);
 
-	// check if MAX_UDP limit is reached
-	for (udpNo = 0; udpNo < MAX_UDP; udpNo++)
+	// check if MAX_UDPLISTEN limit is reached
+	for (udpNo = 0; udpNo < MAX_UDPLISTEN; udpNo++)
 		if (udpfwdList[udpNo].fd == -1) break;
 	
-	if (udpNo == MAX_UDP) 
+	if (udpNo == MAX_UDPLISTEN) 
 	{
-		fprintf(stderr, "UDP rule limit reached!\n");
+		fprintf(stderr, "UDP rule limit reached! (max: %d)\n", MAX_UDPLISTEN);
+		return -1;
+	}
+
+	if (fwdNo == MAX_UDPFWD) 
+	{
+		fprintf(stderr, "UDP rule lists too many forward addresses (max:%d)!\n", MAX_UDPFWD);
 		return -1;
 	}
 
@@ -265,13 +277,16 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpfwdList, fd_set* base_
 		}
 
 		// ip:port has no errors, make address add to forwarding list		
-		udpfwdList[udpNo].fwdlist[fwdNo++] = make_address(fwdAddr, fwdPort);
+		udpfwdList[udpNo].fwdList[fwdNo++] = make_address(fwdAddr, fwdPort);
+		udpfwdList[udpNo].fwdCount = fwdNo;
 	}
 
 	// open socket and udp and add udp to base_rfds
 	int udpFd = bind_inet_socket(atoi(udpListen), SOCK_DGRAM); 
 	udpfwdList[udpNo].fd = udpFd;
 	FD_SET(udpfwdList[udpNo].fd, base_rfds);
+
+	fprintf(stderr, "fwdCount:%d\n", udpfwdList[udpNo].fwdCount);
 
 	return 0;
 }
@@ -312,12 +327,13 @@ void doServer(int fdT)
     char data[] = "Hello message\n";
     char full[] = "Max no of clients reached. Connection not accepted.\n";
 	char msgerror[] = "Unrecognized command.\n";
-    char buf[256];
+    char buf[576];
+	char buf2[65507];
     int con[MAX_TCP];
     for (int i = 0; i < MAX_TCP; i++) con[i] = -1;
 	
-	udpfwd_t udpfwdList[MAX_UDP];
-	for (int i = 0; i < MAX_UDP; i++) udpfwdList[i].fd = -1;
+	udpfwd_t udpfwdList[MAX_UDPLISTEN];
+	for (int i = 0; i < MAX_UDPLISTEN; i++) udpfwdList[i].fd = -1;
     
     // set base_rfds once and use in the loop to reset rfds
     FD_ZERO(&base_rfds);
@@ -363,6 +379,27 @@ void doServer(int fdT)
 					}
 				}
             }
+
+			//check for incoming udp 
+			for (int i = 0; i < MAX_UDPLISTEN; i++)
+            {
+                if (FD_ISSET(udpfwdList[i].fd, &rfds))
+				{
+					//receive udp message
+					if(recv(udpfwdList[i].fd, buf2, sizeof(buf2), 0) < 0) ERR("udp read");
+					fprintf(stderr, "%s", buf2);
+
+					// forward udp message
+					int fd = make_socket(PF_INET, SOCK_DGRAM);
+					for (int j = 0; j < udpfwdList[i].fwdCount; j++)
+					{
+						if(TEMP_FAILURE_RETRY(sendto(fd, buf2, strlen(buf2), 0, &udpfwdList[i].fwdList[j], sizeof(udpfwdList[i].fwdList[j]))) <0 ) ERR("sendto:");
+					}
+					if(TEMP_FAILURE_RETRY(close(fd))<0)ERR("close");
+				}
+			}
+
+
             
             //  new client connection
             if (FD_ISSET(fdT, &rfds) && (cfd = add_new_client(fdT)) > 0)
