@@ -19,7 +19,7 @@
 #define MAX_UDPLISTEN 2
 #define MAX_UDPFWD 10
 #define MAX_TCP 2
-#define MAXBUF 576
+#define MAXBUF 10
 #define ERR(source) (perror(source),\
         fprintf(stderr,"%s:%d\n",__FILE__,__LINE__),\
         exit(EXIT_FAILURE))
@@ -172,7 +172,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpfwdList, fd_set* base_
 	token = strtok_r(NULL, " ", &saveptr1);
 	
 	//check port number is ok
-	for (j = 0; j<strlen(token); j++)
+	for (j = 0; j < strlen(token); j++)
 	{
 		if (!isdigit(token[j]))
 		{
@@ -225,6 +225,9 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpfwdList, fd_set* base_
 			//check ip format
 			if (j == 0)
 			{
+				strncpy(fwdAddr, subtoken, strlen(subtoken));
+				printf(" IP   --> %s\n", fwdAddr);
+
 				for (k = 0, str2 = subtoken; ;k++, str2 = NULL) 
 				{
 					subsubtoken = strtok_r(str2, ".", &saveptr3);
@@ -264,9 +267,6 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpfwdList, fd_set* base_
 					fprintf(stderr, "Error in ip:port - ip has less than 4 parts!\n");
 					return -1;
 				}
-
-				strncpy(fwdAddr, subtoken, strlen(subtoken));
-				printf(" IP   --> %s\n", fwdAddr);
 			}
 		}
 
@@ -277,6 +277,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpfwdList, fd_set* base_
 		}
 
 		// ip:port has no errors, make address add to forwarding list		
+		printf("[%d] %s:%s\n", fwdNo, fwdAddr, fwdPort);
 		udpfwdList[udpNo].fwdList[fwdNo++] = make_address(fwdAddr, fwdPort);
 		udpfwdList[udpNo].fwdCount = fwdNo;
 	}
@@ -358,10 +359,10 @@ void doServer(int fdT)
 				{
 					if(recv(con[i], buf, sizeof(buf), MSG_PEEK) == 0) 
 					{
-						if (TEMP_FAILURE_RETRY(close(con[i])) < 0) ERR("close");
-						fprintf(stderr, "Client disconnected closing socket. [%d]\n", --cons);
-						FD_CLR(con[i], &base_rfds);
+						fprintf(stderr, "Client disconnected. Closing socket. [%d left]\n", --cons);
 						con[i] = -1;
+						FD_CLR(con[i], &base_rfds);
+						if (TEMP_FAILURE_RETRY(close(con[i])) < 0) ERR("close");
 					}
 					else 
 					{
@@ -380,26 +381,25 @@ void doServer(int fdT)
 				}
             }
 
-			//check for incoming udp 
+			// check for incoming udp 
 			for (int i = 0; i < MAX_UDPLISTEN; i++)
             {
                 if (FD_ISSET(udpfwdList[i].fd, &rfds))
 				{
 					//receive udp message
-					if(recv(udpfwdList[i].fd, buf2, sizeof(buf2), 0) < 0) ERR("udp read");
+					if(recv(udpfwdList[i].fd, buf2, MAXBUF, 0) < 0) ERR("udp read");
 					fprintf(stderr, "%s", buf2);
 
 					// forward udp message
 					int fd = make_socket(PF_INET, SOCK_DGRAM);
 					for (int j = 0; j < udpfwdList[i].fwdCount; j++)
 					{
-						if(TEMP_FAILURE_RETRY(sendto(fd, buf2, strlen(buf2), 0, &udpfwdList[i].fwdList[j], sizeof(udpfwdList[i].fwdList[j]))) <0 ) ERR("sendto:");
+						fprintf(stderr, "fwdCount:%d/%d\n", j+1, udpfwdList[i].fwdCount);
+						if(TEMP_FAILURE_RETRY(sendto(fd, buf2, sizeof(buf2), 0, (struct sockaddr *)&udpfwdList[i].fwdList[j], sizeof(udpfwdList[i].fwdList[j]))) <0 ) ERR("sendto:");
 					}
-					if(TEMP_FAILURE_RETRY(close(fd))<0)ERR("close");
+					//if(TEMP_FAILURE_RETRY(close(fd))<0)ERR("close");
 				}
 			}
-
-
             
             //  new client connection
             if (FD_ISSET(fdT, &rfds) && (cfd = add_new_client(fdT)) > 0)
@@ -441,12 +441,12 @@ void doServer(int fdT)
     fprintf(stderr, "SIGINT received.\n");
 
     // close open sockets
-    for (int i = 0; i < BACKLOG; i++) 
+    for (int i = 0; i < MAX_TCP; i++) 
     {
         if (con[i] != -1)
         {
             if (TEMP_FAILURE_RETRY(close(con[i])) < 0) ERR("close");
-            fprintf(stderr, "Closing socket. [%d]\n", --cons);
+            fprintf(stderr, "Closing socket. [%d left]\n", --cons);
         }
     }
 
