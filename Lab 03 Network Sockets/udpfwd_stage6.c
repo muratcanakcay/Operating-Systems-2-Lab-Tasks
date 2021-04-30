@@ -211,7 +211,7 @@ int validateIp(char* ipAddr){
 }
 
 // check that the given string is a valid port number
-int validatePort(char* portNo){
+int validatePort(char* portNo, int listenPort){
     //check port is a number
     if (isnumeric(portNo) < 0)
     {
@@ -219,7 +219,8 @@ int validatePort(char* portNo){
         return INVLDPRT;
     }
 
-    if (strtol(portNo, NULL, 10) < 1024 || strtol(portNo, NULL, 10) > 65535)
+    // listen port must be > 1024
+    if ( ( listenPort && (strtol(portNo, NULL, 10) < 1024)) || strtol(portNo, NULL, 10) > 65535)
     {
         if (DEBUG) fprintf(stderr, "Port number must be between 1024 and 65535.\n");
         return INVLDPRT;
@@ -252,7 +253,7 @@ int validateIpPort(char* ipPort, char*fwdAddr, char* fwdPort){
             strncpy(fwdPort, token, strlen(token));
             if (DEBUG) fprintf(stderr, " PORT --> %s\n", fwdPort);
 
-            if ((ret = validatePort(token)) < 0) return ret;
+            if ((ret = validatePort(token, 0)) < 0) return ret;
         }
 
         //check ip format
@@ -297,7 +298,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
     }
      
     //check port number is ok
-    if (validatePort(token) < 0) return INVLDPRT;
+    if (validatePort(token, 1) < 0) return INVLDPRT;
 
     strncpy(udpListen, token, strlen(token));
     if (DEBUG) fprintf(stderr, "Listen port: -%s-\n", udpListen);
