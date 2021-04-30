@@ -403,7 +403,7 @@ int sendFwdInfo(int cfd, udpfwd_t* udpFwdList){
     
     for (int j = 0; j < MAX_UDPLISTEN; j++)
     {
-        fprintf(stderr, "%d - %d\n", j, udpFwdList[j].fd);
+        if (DEBUG) fprintf(stderr, "Array pos: %d - file desc: %d\n", j, udpFwdList[j].fd);
         
         if (udpFwdList[j].fd == -1) continue;
 
