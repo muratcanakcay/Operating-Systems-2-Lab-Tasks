@@ -66,15 +66,17 @@ int make_socket(int domain, int type){
     if(sock < 0) ERR("socket");
     return sock;
 }
-struct sockaddr_in make_address(char *address, char *port){
+struct sockaddr_in make_address(char *address, char *port, int* err){
     int ret;
     struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(struct sockaddr_in));
     struct addrinfo *result;
     struct addrinfo hints = {};
     hints.ai_family = AF_INET;
-    if((ret=getaddrinfo(address,port, &hints, &result))){
+    if((ret=getaddrinfo(address, port, &hints, &result))){
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(ret));
-        exit(EXIT_FAILURE);
+        *err = -1;
+        return addr;
     }
     addr = *(struct sockaddr_in *)(result->ai_addr);
     freeaddrinfo(result);
@@ -149,7 +151,7 @@ int validateIp(char* ipAddr){
         if (token == NULL)
             break;
 
-        printf("      --> %s\n", token);
+        fprintf(stderr, "      --> %s\n", token);
         
         // check ip has at most 4 segments
         if(i >= 4) 
@@ -223,7 +225,7 @@ int validateIpPort(char* ipPort, char*fwdAddr, char* fwdPort){
         if (i == 1)
         {	
             strncpy(fwdPort, token, strlen(token));
-            printf(" PORT --> %s\n", fwdPort);
+            fprintf(stderr, " PORT --> %s\n", fwdPort);
 
             if (validatePort(token) < 0) return -1;
         }
@@ -232,7 +234,7 @@ int validateIpPort(char* ipPort, char*fwdAddr, char* fwdPort){
         if (i == 0)
         {
             strncpy(fwdAddr, token, strlen(token));
-            printf("IP   --> %s\n", fwdAddr);
+            fprintf(stderr, "IP   --> %s\n", fwdAddr);
 
             if (validateIp(token) < 0) return -1;
         }
@@ -287,6 +289,8 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
     // get ip:port to forward to
     while(1)
     {
+        int err=0;
+        
         token = strtok_r(NULL, " ", &saveptr1);
         if (token == NULL) break;
 
@@ -301,9 +305,13 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
         if(validateIpPort(token, fwdAddr, fwdPort) < 0) return -1;
 
         // <ip:port> has no errors, make address and add to forwarding list		
-        printf("[%d] %s:%s\n", fwdNo+1, fwdAddr, fwdPort);
-        
-        udpFwdList[udpNo].fwdList[fwdNo] = make_address(fwdAddr, fwdPort);
+        fprintf(stderr, "[%d] %s:%s\n", fwdNo+1, fwdAddr, fwdPort);
+        udpFwdList[udpNo].fwdList[fwdNo] = make_address(fwdAddr, fwdPort, &err);
+        if(err < 0) 
+        {
+            fprintf(stderr, "Cannot connect to %s:%s\n", fwdAddr, fwdPort);
+            return -1;
+        }
 		strncpy(udpFwdList[udpNo].port, udpListen, 5);
 		strncpy(udpFwdList[udpNo].fwdAddr[fwdNo], fwdAddr, 16);
 		strncpy(udpFwdList[udpNo].fwdPort[fwdNo], fwdPort, 5) ;
@@ -403,14 +411,12 @@ int process_msg(char* msg, udpfwd_t* udpFwdList, fd_set* base_rfds, int cfd){
     if (strcmp(token, "fwd") == 0)
     {
         // stage 4
-        if(process_fwd(token, saveptr1, udpFwdList, base_rfds) < 0) return -1;
-        return 0;
+        return(process_fwd(token, saveptr1, udpFwdList, base_rfds) < 0);        
     }
     else if (strcmp(token, "close") == 0)
     {
         // stage 5
-        if(process_close(token, saveptr1, udpFwdList, base_rfds) < 0) return -1;
-        return 0;
+        return(process_close(token, saveptr1, udpFwdList, base_rfds) < 0);
     }
     else if(strcmp(token, "show") == 0)
     {
