@@ -126,7 +126,25 @@ ssize_t bulk_write(int fd, char *buf, size_t count){
     return len;
 }
 
-int validateFwdAddr(char* fwdAddr)
+int validatePort(char* portNo)
+{
+    //check port is a number
+    if (isnumeric(portNo) < 0)
+    {
+        fprintf(stderr, "Error in ip:port - port is not a number!\n");
+        return -1;
+    }
+
+    if (strtol(portNo, NULL, 10) < 1024 || strtol(portNo, NULL, 10) > 65535)
+    {
+        fprintf(stderr, "Port number must be between 1024 and 65535.\n");
+        return -1;
+    }
+
+    return 0;
+}
+
+int validateIp(char* fwdAddr)
 {
     int i = 0;
     char *subsubtoken, *str2, *saveptr3;
@@ -263,19 +281,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
             // check port format
             if (j == 1)
             {	
-                
-                //check port is a number
-                if (isnumeric(subtoken) < 0)
-                {
-                    fprintf(stderr, "Error in ip:port - port is not a number!\n");
-                    return -1;
-                }
-
-				if (strtol(subtoken, NULL, 10) < 1024 || strtol(subtoken, NULL, 10) > 65535)
-                {
-                    fprintf(stderr, "Port number must be between 1024 and 65535.\n");
-                    return -1;
-                }
+                if (validatePort(subtoken) < 0) return -1;
 
                 strncpy(fwdPort, subtoken, strlen(subtoken));
                 printf(" PORT --> %s\n", fwdPort);
@@ -284,7 +290,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
             //check ip format
             if (j == 0)
             {
-                if (validateFwdAddr(subtoken) < 0) return -1;
+                if (validateIp(subtoken) < 0) return -1;
 
                 strncpy(fwdAddr, subtoken, strlen(subtoken));
                 printf("IP   --> %s\n", fwdAddr);
