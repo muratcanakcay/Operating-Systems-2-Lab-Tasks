@@ -176,14 +176,14 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
     // get ip:port to forward to
     while(1)
     {
+        token = strtok_r(NULL, " ", &saveptr1);
+        if (token == NULL) break;
+        
         if (fwdNo == MAX_UDPFWD) 
         {
             fprintf(stderr, "UDP rule lists too many forward addresses (max:%d)!\n", MAX_UDPFWD);
             return -1;
         }
-        
-        token = strtok_r(NULL, " ", &saveptr1);
-        if (token == NULL) break;
 
         // ip:port
         fprintf(stderr, "[%d] ip:port = %s\n", ++i, token);
@@ -286,7 +286,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
         }
 
         // ip:port has no errors, make address and add to forwarding list		
-        printf("[%d] %s:%s\n", fwdNo, fwdAddr, fwdPort);
+        printf("[%d] %s:%s\n", fwdNo+1, fwdAddr, fwdPort);
         udpFwdList[udpNo].fwdList[fwdNo++] = make_address(fwdAddr, fwdPort);
 		strncpy(udpFwdList[udpNo].port, udpListen, 5);
 		strncpy(udpFwdList[udpNo].fwdAddr[fwdNo], fwdAddr, 16);
@@ -459,12 +459,29 @@ void doServer(int fdT)
                         else if (ret == 1) // <show> message received
                         {
                             int ruleNo = 0;
-                            for (int j = 0; j < MAX_TCP; j++)
+                            
+                            memset(buf, 0, sizeof(buf));
+                            sprintf(buf, "\nActive forwarding rules are:\n");
+                            if(bulk_write(tcpCon[i], buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
+                            
+                            for (int j = 0; j < MAX_UDPLISTEN; j++)
                             {
                                 if (udpFwdList[j].fd == -1) continue;
 
                                 ruleNo++;
-                                sprintf(buf, "[%02d] %5s - ", ruleNo, udpFwdList[j].port);
+                                memset(buf, 0, sizeof(buf));
+                                sprintf(buf, "[%02d] %-5s --> ", ruleNo, udpFwdList[j].port);
+                                if(bulk_write(tcpCon[i], buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
+                                
+                                for (int k = 0; k < udpFwdList[j].fwdCount; k++)
+                                {
+                                    memset(buf, 0, sizeof(buf));
+                                    sprintf(buf, "%-16s:%-5s ", udpFwdList[j].fwdAddr[k], udpFwdList[j].fwdPort[k]);
+                                    if(bulk_write(tcpCon[i], buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
+                                }
+                                
+                                memset(buf, 0, sizeof(buf));
+                                sprintf(buf, "\n");
                                 if(bulk_write(tcpCon[i], buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
                             }
 
