@@ -16,8 +16,8 @@
 #include <ctype.h>
 #include <stdbool.h>
 
-#define MAX_UDPFWD 2
-#define MAX_UDPLISTEN 2
+#define MAX_UDPFWD 4
+#define MAX_UDPLISTEN 4
 #define MAX_TCP 3
 #define MAXBUF 65507
 #define BACKLOG 3
@@ -30,9 +30,9 @@ volatile sig_atomic_t do_work = 1;
 typedef struct udpfwd_t{
     int fd;
     int fwdCount;
-    char port[5];
+    char port[6];
     char fwdAddr[MAX_UDPFWD][16]; 	// IPv4 address can be at most 16 bits (including periods)
-    char fwdPort[MAX_UDPFWD][5];	// Port number can be at most 65535 = 5 chars
+    char fwdPort[MAX_UDPFWD][6];	// Port number can be at most 65535 = 5 chars
     struct sockaddr_in fwdList[MAX_UDPFWD];
 
 } udpfwd_t;
@@ -128,7 +128,7 @@ ssize_t bulk_write(int fd, char *buf, size_t count){
 // THIS FUNCTION IS TOO LONG!!!
 int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_rfds){
     char *subtoken, *subsubtoken, *str, *str2, *saveptr2, *saveptr3;
-    char fwdAddr[16] = "", fwdPort[5] = "", udpListen[5] = "";
+    char fwdAddr[16] = "", fwdPort[6] = "", udpListen[6] = "";
     int i = 0, j = 0, k = 0, m = 0, udpNo = 0, fwdNo = 0;
 
     // check if MAX_UDPLISTEN limit is reached
@@ -156,7 +156,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
         return -1;
     }
 
-	if (atoi(token) < 1025 || atoi(token) > 65535)
+	if (strtol(token, NULL, 10) < 1025 || strtol(token, NULL, 10) > 65535)
 	{
 		fprintf(stderr, "Port number must be between 1025 and 65535.\n");
         return -1;
@@ -168,7 +168,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
     for (j = 0; j < MAX_UDPLISTEN; j++)
     {
         if (udpFwdList[j].fd != -1) fprintf(stderr, "%d, %s \n", j, udpFwdList[j].port);
-		if (udpFwdList[j].fd == -1 || atoi(udpListen) != atoi(udpFwdList[j].port)) continue;
+		if (udpFwdList[j].fd == -1 || strtol(udpListen, NULL, 10) != strtol(udpFwdList[j].port, NULL, 10)) continue;
         fprintf(stderr, "There's already a rule defined for this port! Close it first.\n");
         return -1;
     }
@@ -178,7 +178,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
     {
         token = strtok_r(NULL, " ", &saveptr1);
         if (token == NULL) break;
-        
+
         if (fwdNo == MAX_UDPFWD) 
         {
             fprintf(stderr, "UDP rule lists too many forward addresses (max:%d)!\n", MAX_UDPFWD);
@@ -212,7 +212,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
                     return -1;
                 }
 
-				if (atoi(subtoken) < 1025 || atoi(subtoken) > 65535)
+				if (strtol(subtoken, NULL, 10) < 1025 || strtol(subtoken, NULL, 10) > 65535)
                 {
                     fprintf(stderr, "Port number must be between 1025 and 65535.\n");
                     return -1;
@@ -287,15 +287,15 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
 
         // ip:port has no errors, make address and add to forwarding list		
         printf("[%d] %s:%s\n", fwdNo+1, fwdAddr, fwdPort);
-        udpFwdList[udpNo].fwdList[fwdNo++] = make_address(fwdAddr, fwdPort);
+        udpFwdList[udpNo].fwdList[fwdNo] = make_address(fwdAddr, fwdPort);
 		strncpy(udpFwdList[udpNo].port, udpListen, 5);
 		strncpy(udpFwdList[udpNo].fwdAddr[fwdNo], fwdAddr, 16);
 		strncpy(udpFwdList[udpNo].fwdPort[fwdNo], fwdPort, 5) ;
-        udpFwdList[udpNo].fwdCount = fwdNo;
+        udpFwdList[udpNo].fwdCount = ++fwdNo;
     }
 
     // open socket and udp and add udp to base_rfds
-    int udpFd = bind_inet_socket(atoi(udpListen), SOCK_DGRAM); 
+    int udpFd = bind_inet_socket(strtol(udpListen, NULL, 10), SOCK_DGRAM); 
     udpFwdList[udpNo].fd = udpFd;
     FD_SET(udpFwdList[udpNo].fd, base_rfds);
 
@@ -306,7 +306,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
 
 int process_close(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_rfds){
     int j = 0;
-    char udpListen[5] = "";
+    char udpListen[6] = "";
 
     // get port number to close
     if ((token = strtok_r(NULL, " ", &saveptr1)) == NULL)
@@ -328,7 +328,7 @@ int process_close(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* bas
     
     for (j = 0; j < MAX_UDPLISTEN; j++)
     {
-        if (udpFwdList[j].fd == -1 || atoi(udpListen) != atoi(udpFwdList[j].port)) continue;
+        if (udpFwdList[j].fd == -1 || strtol(udpListen, NULL, 10) != strtol(udpFwdList[j].port, NULL, 10)) continue;
         
         // remove udp from base_rdfs, close socket and set fd to -1
         FD_CLR(udpFwdList[j].fd, base_rfds);
@@ -470,13 +470,17 @@ void doServer(int fdT)
 
                                 ruleNo++;
                                 memset(buf, 0, sizeof(buf));
-                                sprintf(buf, "[%02d] %-5s --> ", ruleNo, udpFwdList[j].port);
+                                sprintf(buf, "[%02d] Port %-5s is forwarded to:\n", ruleNo, udpFwdList[j].port);
+                                if(bulk_write(tcpCon[i], buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
+
+                                memset(buf, 0, sizeof(buf));
+                                sprintf(buf, "%24s : %5s\n%24s   %5s\n", "IP Adress", "Port", "----------------", "-----");
                                 if(bulk_write(tcpCon[i], buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
                                 
                                 for (int k = 0; k < udpFwdList[j].fwdCount; k++)
                                 {
                                     memset(buf, 0, sizeof(buf));
-                                    sprintf(buf, "%-16s:%-5s ", udpFwdList[j].fwdAddr[k], udpFwdList[j].fwdPort[k]);
+                                    sprintf(buf, "%24s : %5s\n", udpFwdList[j].fwdAddr[k], udpFwdList[j].fwdPort[k]);
                                     if(bulk_write(tcpCon[i], buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
                                 }
                                 
@@ -555,7 +559,7 @@ int main(int argc, char** argv)
     if(sethandler(sigint_handler,SIGINT)) ERR("Seting SIGINT:");
     
     // make and bind tcp listen socket
-    fdT=bind_inet_socket(atoi(argv[1]), SOCK_STREAM);
+    fdT=bind_inet_socket(strtol(argv[1], NULL, 10), SOCK_STREAM);
     
     // set tcp listen socket to nonblocking
     new_flags = fcntl(fdT, F_GETFL) | O_NONBLOCK;
