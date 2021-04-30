@@ -16,8 +16,8 @@
 #include <ctype.h>
 #include <stdbool.h>
 
-#define MAX_UDPFWD 10
-#define MAX_UDPLISTEN 10
+#define MAX_UDPFWD 2
+#define MAX_UDPLISTEN 2
 #define MAX_TCP 3
 #define MAXBUF 65507
 #define BACKLOG 3
@@ -27,8 +27,7 @@
 
 volatile sig_atomic_t do_work = 1;
 
-typedef struct udpfwd_t
-{
+typedef struct udpfwd_t{
     int fd;
     int fwdCount;
     char port[5];
@@ -37,15 +36,22 @@ typedef struct udpfwd_t
     struct sockaddr_in fwdList[MAX_UDPFWD];
 
 } udpfwd_t;
-
 void usage(char * name){
     fprintf(stderr,"USAGE: %s port\n", name);
 }
-
+int isnumeric(char* str){
+    for (int i = 0; i < strlen(str); i++)
+    {
+        if (!isdigit(str[i]))
+        {
+            return -1;
+        }
+    }
+    return 0;
+}
 void sigint_handler(int sig) {
     do_work=0;
 }
-
 int sethandler( void (*f)(int), int sigNo) {
     struct sigaction act;
     memset(&act, 0, sizeof(struct sigaction));
@@ -54,16 +60,12 @@ int sethandler( void (*f)(int), int sigNo) {
         return -1;
     return 0;
 }
-
-// make socket
 int make_socket(int domain, int type){
     int sock;
     sock = socket(domain,type,0);
     if(sock < 0) ERR("socket");
     return sock;
 }
-
-// make address
 struct sockaddr_in make_address(char *address, char *port){
     int ret;
     struct sockaddr_in addr;
@@ -78,8 +80,6 @@ struct sockaddr_in make_address(char *address, char *port){
     freeaddrinfo(result);
     return addr;
 }
-
-// bind internet socket
 int bind_inet_socket(uint16_t port, int type){
     struct sockaddr_in addr;
     int socketfd, t = 1;
@@ -97,8 +97,6 @@ int bind_inet_socket(uint16_t port, int type){
         if(listen(socketfd, BACKLOG) < 0) ERR("listen");
     return socketfd;
 }
-
-// accept connection
 int add_new_client(int sfd){
     int nfd;
     socklen_t size = sizeof(struct sockaddr_in);
@@ -111,7 +109,6 @@ int add_new_client(int sfd){
 
     return nfd;
 }
-
 ssize_t bulk_write(int fd, char *buf, size_t count){
     int c;
     size_t len=0;
@@ -129,11 +126,10 @@ ssize_t bulk_write(int fd, char *buf, size_t count){
 }
 
 // THIS FUNCTION IS TOO LONG!!!
-int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_rfds)
-{
+int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_rfds){
     char *subtoken, *subsubtoken, *str, *str2, *saveptr2, *saveptr3;
     char fwdAddr[16] = "", fwdPort[5] = "", udpListen[5] = "";
-    int i = 0, j = 0, k = 0, l = 0, m = 0, udpNo = 0, fwdNo = 0;
+    int i = 0, j = 0, k = 0, m = 0, udpNo = 0, fwdNo = 0;
 
     // check if MAX_UDPLISTEN limit is reached
     for (udpNo = 0; udpNo < MAX_UDPLISTEN; udpNo++)
@@ -160,9 +156,9 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
         return -1;
     }
 
-	if (atoi(token) > 65535)
+	if (atoi(token) < 1025 || atoi(token) > 65535)
 	{
-		fprintf(stderr, "udp listen port number cannot be larger than 65535!\n");
+		fprintf(stderr, "Port number must be between 1025 and 65535.\n");
         return -1;
 	}
 
@@ -208,20 +204,19 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
             // check port format
             if (j == 1)
             {	
-                for (k = 0; k < strlen(subtoken); k++)
+                
+                //check port is a number
+                if (isnumeric(subtoken) < 0)
                 {
-                    if (!isdigit(subtoken[k]))
-                    {
-                        fprintf(stderr, "Error in ip:port - port is not a number!\n");
-                        return -1;
-                    }
+                    fprintf(stderr, "Error in ip:port - port is not a number!\n");
+                    return -1;
                 }
 
-				if (atoi(token) > 65535)
-				{
-					fprintf(stderr, "udp listen port number cannot be larger than 65535!\n");
-					return -1;
-				}
+				if (atoi(subtoken) < 1025 || atoi(subtoken) > 65535)
+                {
+                    fprintf(stderr, "Port number must be between 1025 and 65535.\n");
+                    return -1;
+                }
 
                 strncpy(fwdPort, subtoken, strlen(subtoken));
                 printf(" PORT --> %s\n", fwdPort);
@@ -251,6 +246,8 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
                     subsubtoken = strtok_r(str2, ".", &saveptr3);
                     if (subsubtoken == NULL)
                         break;
+
+                    printf("      --> %s\n", subsubtoken);
                     
                     // check ip has 4 segments
                     if(k >= 4) 
@@ -260,24 +257,18 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
                     }
 
                     // check each segment is a number
-                    for (l = 0; l < strlen(subsubtoken); l++)
+                    if(isnumeric(subsubtoken) < 0) 
                     {
-                        if (!isdigit(subsubtoken[l]))
-                        {
-                            fprintf(stderr, "Error in ip:port - part of ip is not a number!\n");
-                            return -1;
-                        }
+                        fprintf(stderr, "Error in IP number - part of ip is not a number!\n");   
+                        return -1;
                     }
 
                     // check each segment is < 256
-                    
                     if (strtol(subsubtoken, NULL, 10) > 255)
                     {
-                        fprintf(stderr, "Error in ip:port - part of ip is greater than 255!\n");
+                        fprintf(stderr, "Error in IP number - part of ip is greater than 255!\n");
                         return -1;
-                    }					
-
-                    printf("      --> %s\n", subsubtoken);
+                    }
                 }
 
                 if(k < 4) 
@@ -288,7 +279,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
             }
         }
 
-        if(j < 2) 
+        if (j < 2) 
         {
             fprintf(stderr, "Error in ip:port - one argument missing!\n");
             return -1;
@@ -313,8 +304,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
     return 0;
 }
 
-int process_close(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_rfds)
-{
+int process_close(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_rfds){
     int j = 0;
     char udpListen[5] = "";
 
@@ -352,8 +342,7 @@ int process_close(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* bas
     return -1;
 }
 
-int process_msg(char* msg, udpfwd_t* udpFwdList, fd_set* base_rfds)
-{
+int process_msg(char* msg, udpfwd_t* udpFwdList, fd_set* base_rfds){
     char *token, *saveptr1;
     
     token = strtok_r(msg, " ", &saveptr1);
@@ -373,8 +362,7 @@ int process_msg(char* msg, udpfwd_t* udpFwdList, fd_set* base_rfds)
     else if(strcmp(token, "show") == 0)
     {
         // stage 6
-        fprintf(stderr, "SHOW = %s\n", msg);
-        return 0;
+        return 1;
     }
     else return -1;	
 }
@@ -412,6 +400,36 @@ void doServer(int fdT)
         
         if (pselect(FD_SETSIZE, &rfds, NULL, NULL, NULL, &oldmask) > 0) // FD_SETSIZE bad??
         {
+            //  new client connection
+            if (FD_ISSET(fdT, &rfds) && (cfd = add_new_client(fdT)) > 0)
+            {
+                // if less than 3 clients add new client
+                if (tcpCons < 3)
+                {
+                    int added = 0;
+                    for (int i = 0; i < MAX_TCP; i++) 
+                    {
+                        if (tcpCon[i] == -1)
+                        {
+                            tcpCon[i] = cfd;
+                            FD_SET(cfd, &base_rfds);
+                            added = 1;
+                            fprintf(stderr, "Client connected. [%d]\n", ++tcpCons);
+                            break;
+                        }
+                    }
+                    if (!added) ERR("Connection add error");
+                    
+                    if(bulk_write(cfd, hello, sizeof(hello)) < 0 && errno!=EPIPE) ERR("write:");
+                }
+                else // max. clients reached. send info msg.
+                {
+                    if (bulk_write(cfd, full, sizeof(full)) < 0 && errno!=EPIPE) ERR("write:");
+                    fprintf(stderr, "Client connection request refused.\n");
+                    if (TEMP_FAILURE_RETRY(close(cfd)) < 0) ERR("close");
+                }            
+            }        
+            
             // check incoming tcp
             for (int i = 0; i < MAX_TCP; i++)
             {
@@ -433,10 +451,23 @@ void doServer(int fdT)
                         buf[ret-2] = '\0'; // remove endline char
                         
                         fprintf(stderr, "RECEIVED: --%s-- with size %d\n", buf, ret);
-                        
-                        if (process_msg(buf, udpFwdList, &base_rfds) < 0) // if unrecognized format
+                        ret = process_msg(buf, udpFwdList, &base_rfds);
+                        if (ret < 0) // if unrecognized format
                         {
                             if(bulk_write(tcpCon[i], msgerror, sizeof(msgerror)) < 0 && errno!=EPIPE) ERR("write:");
+                        }
+                        else if (ret == 1) // <show> message received
+                        {
+                            int ruleNo = 0;
+                            for (int j = 0; j < MAX_TCP; j++)
+                            {
+                                if (udpFwdList[j].fd == -1) continue;
+
+                                ruleNo++;
+                                sprintf(buf, "[%02d] %5s - ", ruleNo, udpFwdList[j].port);
+                                if(bulk_write(tcpCon[i], buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
+                            }
+
                         }
                     }
                 }
@@ -459,36 +490,6 @@ void doServer(int fdT)
                         if(TEMP_FAILURE_RETRY(sendto(fdU, buf, sizeof(buf), 0, &udpFwdList[i].fwdList[j], sizeof(udpFwdList[i].fwdList[j]))) <0 ) ERR("sendto:");
                 }
             }
-            
-            //  new client connection
-            if (FD_ISSET(fdT, &rfds) && (cfd = add_new_client(fdT)) > 0)
-            {
-                // if less than 3 clients add new client
-                if (tcpCons < 3)
-                {
-                    int added = 0;
-                    for (int i = 0; i < BACKLOG; i++) 
-                    {
-                        if (tcpCon[i] == -1)
-                        {
-                            tcpCon[i] = cfd;
-                            FD_SET(cfd, &base_rfds);
-                            added = 1;
-                            fprintf(stderr, "Client connected. [%d]\n", ++tcpCons);
-                            break;
-                        }
-                    }
-                    if (!added) ERR("Connection add error");
-                    
-                    if(bulk_write(cfd, hello, sizeof(hello)) < 0 && errno!=EPIPE) ERR("write:");
-                }
-                else // max. clients reached. send info msg.
-                {
-                    if (bulk_write(cfd, full, sizeof(full)) < 0 && errno!=EPIPE) ERR("write:");
-                    fprintf(stderr, "Client connection request refused.\n");
-                    if (TEMP_FAILURE_RETRY(close(cfd)) < 0) ERR("close");
-                }            
-            }        
         }
         else
         {
