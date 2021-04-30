@@ -16,8 +16,8 @@
 #include <ctype.h>
 #include <stdbool.h>
 
-#define MAX_UDPFWD 4
-#define MAX_UDPLISTEN 4
+#define MAX_UDPFWD 10
+#define MAX_UDPLISTEN 10
 #define MAX_TCP 3
 #define MAXBUF 65507
 #define BACKLOG 3
@@ -29,9 +29,9 @@ volatile sig_atomic_t do_work = 1;
 
 typedef struct udpfwd_t{
     int fd;
-    int fwdCount;
-    char port[6];
-    char fwdAddr[MAX_UDPFWD][16]; 	// IPv4 address can be at most 16 bits (including periods)
+    int fwdCount;                   // no. of forward addreses in this rule
+    char port[6];                   // port no. to listen on
+    char fwdAddr[MAX_UDPFWD][16]; 	// IPv4 address can be at most 16 chars (including periods)
     char fwdPort[MAX_UDPFWD][6];	// Port number can be at most 65535 = 5 chars
     struct sockaddr_in fwdList[MAX_UDPFWD];
 
@@ -49,6 +49,7 @@ int isnumeric(char* str){
     }
     return 0;
 }
+void sendFwdInfo(int fdT, udpfwd_t* udpFwdList); // declaration
 void sigint_handler(int sig) {
     do_work=0;
 }
@@ -194,7 +195,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
             if (subtoken == NULL)
                 break;
 
-            // check ip:port has only 2 segments
+            // check <ip:port> has only 2 segments
             if(j >= 2) 
             {
                 fprintf(stderr, "Error in ip:port!\n");
@@ -271,7 +272,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
                     }
                 }
 
-                if(k < 4) 
+                if(k < 4)
                 {
                     fprintf(stderr, "Error in ip:port - ip has less than 4 parts!\n");
                     return -1;
@@ -285,7 +286,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
             return -1;
         }
 
-        // ip:port has no errors, make address and add to forwarding list		
+        // <ip:port> has no errors, make address and add to forwarding list		
         printf("[%d] %s:%s\n", fwdNo+1, fwdAddr, fwdPort);
         udpFwdList[udpNo].fwdList[fwdNo] = make_address(fwdAddr, fwdPort);
 		strncpy(udpFwdList[udpNo].port, udpListen, 5);
@@ -299,7 +300,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
     udpFwdList[udpNo].fd = udpFd;
     FD_SET(udpFwdList[udpNo].fd, base_rfds);
 
-    fprintf(stderr, "fwdCount:%d\n", udpFwdList[udpNo].fwdCount);
+    fprintf(stderr, "Forward addresses in the rule: %d\n", udpFwdList[udpNo].fwdCount);
 
     return 0;
 }
@@ -327,7 +328,7 @@ int process_close(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* bas
     
     for (j = 0; j < MAX_UDPLISTEN; j++)
     {
-        // skip until finding the correct array position of the port
+        // skip until finding the position of the port in the array
         if (udpFwdList[j].fd == -1 || strtol(udpListen, NULL, 10) != strtol(udpFwdList[j].port, NULL, 10)) continue;
         
         // remove udp from base_rdfs, close socket and set fd to -1
@@ -342,7 +343,7 @@ int process_close(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* bas
     return -1;
 }
 
-int process_msg(char* msg, udpfwd_t* udpFwdList, fd_set* base_rfds){
+int process_msg(char* msg, udpfwd_t* udpFwdList, fd_set* base_rfds, int cfd){
     char *token, *saveptr1;
     
     token = strtok_r(msg, " ", &saveptr1);
@@ -350,32 +351,33 @@ int process_msg(char* msg, udpfwd_t* udpFwdList, fd_set* base_rfds){
     if (strcmp(token, "fwd") == 0)
     {
         // stage 4
-        if(process_fwd(token, saveptr1, udpFwdList, base_rfds) < -1) return -1;
+        if(process_fwd(token, saveptr1, udpFwdList, base_rfds) < 0) return -1;
         return 0;
     }
     else if (strcmp(token, "close") == 0)
     {
         // stage 5
-        if(process_close(token, saveptr1, udpFwdList, base_rfds) < -1) return -1;
+        if(process_close(token, saveptr1, udpFwdList, base_rfds) < 0) return -1;
         return 0;
     }
     else if(strcmp(token, "show") == 0)
     {
         // stage 6
-        return 1;
+        sendFwdInfo(cfd, udpFwdList);
+        return 0;
     }
     else return -1;	
 }
 
 // reply to <show> command
-void sendFwdInfo(int fdT, udpfwd_t* udpFwdList)
+void sendFwdInfo(int cfd, udpfwd_t* udpFwdList)
 {
     char buf[MAXBUF] = "";
     int ruleNo = 0;
                             
     memset(buf, 0, sizeof(buf));
     sprintf(buf, "\nActive forwarding rules are:\n");
-    if(bulk_write(fdT, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
+    if(bulk_write(cfd, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
     
     for (int j = 0; j < MAX_UDPLISTEN; j++)
     {
@@ -384,22 +386,22 @@ void sendFwdInfo(int fdT, udpfwd_t* udpFwdList)
         ruleNo++;
         memset(buf, 0, sizeof(buf));
         sprintf(buf, "[%02d] Port %-5s is forwarded to:\n", ruleNo, udpFwdList[j].port);
-        if(bulk_write(fdT, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
+        if(bulk_write(cfd, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
 
         memset(buf, 0, sizeof(buf));
         sprintf(buf, "%24s : %5s\n%24s   %5s\n", "IP Adress", "Port", "----------------", "-----");
-        if(bulk_write(fdT, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
+        if(bulk_write(cfd, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
         
         for (int k = 0; k < udpFwdList[j].fwdCount; k++)
         {
             memset(buf, 0, sizeof(buf));
             sprintf(buf, "%24s : %5s\n", udpFwdList[j].fwdAddr[k], udpFwdList[j].fwdPort[k]);
-            if(bulk_write(fdT, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
+            if(bulk_write(cfd, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
         }
         
         memset(buf, 0, sizeof(buf));
         sprintf(buf, "\n");
-        if(bulk_write(fdT, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
+        if(bulk_write(cfd, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
     }
 }
 
@@ -410,7 +412,7 @@ void doServer(int fdT)
     char buf[MAXBUF];
     char hello[] = "Hello message\n";
     char full[] = "Max no of clients reached. Connection not accepted.\n";
-    char msgerror[] = "Unrecognized command.\n";
+    char msgerror[] = "Invalid command. Please check and try again.\n";
     fd_set base_rfds, rfds;
     sigset_t mask, oldmask;
     udpfwd_t udpFwdList[MAX_UDPLISTEN];
@@ -487,14 +489,12 @@ void doServer(int fdT)
                         buf[ret-2] = '\0'; // remove endline char
                         
                         fprintf(stderr, "RECEIVED: --%s-- with size %d\n", buf, ret);
-                        ret = process_msg(buf, udpFwdList, &base_rfds);
-                        if (ret < 0) // if unrecognized format
+                        
+                        //process incoming message
+                        if((ret = process_msg(buf, udpFwdList, &base_rfds, tcpCon[i])) < 0) 
                         {
+                            // there's an error in message
                             if(bulk_write(tcpCon[i], msgerror, sizeof(msgerror)) < 0 && errno!=EPIPE) ERR("write:");
-                        }
-                        else if (ret == 1) // <show> message received
-                        {
-                            sendFwdInfo(tcpCon[i], udpFwdList);
                         }
                     }
                 }
