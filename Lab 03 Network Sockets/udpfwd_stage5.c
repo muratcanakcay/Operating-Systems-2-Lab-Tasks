@@ -180,14 +180,14 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
     // get ip:port to forward to
     while(1)
     {
+        token = strtok_r(NULL, " ", &saveptr1);
+        if (token == NULL) break;
+        
         if (fwdNo == MAX_UDPFWD) 
         {
             fprintf(stderr, "UDP rule lists too many forward addresses (max:%d)!\n", MAX_UDPFWD);
             return -1;
         }
-        
-        token = strtok_r(NULL, " ", &saveptr1);
-        if (token == NULL) break;
 
         // ip:port
         fprintf(stderr, "[%d] ip:port = %s\n", ++i, token);
