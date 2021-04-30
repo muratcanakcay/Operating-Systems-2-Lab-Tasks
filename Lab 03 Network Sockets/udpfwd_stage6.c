@@ -500,21 +500,38 @@ int process_msg(char* msg, udpfwd_t* udpFwdList, fd_set* base_rfds, int cfd){
     else return INVLDCMD;	
 }
 
+// returns max of the open file descriptors
+int getMaxFd(udpfwd_t* udpFwdList, int* tcpFd, int sfd){
+    int i, maxFd = sfd;
+
+    for (i = 0; i < MAX_TCP; i++)
+    {
+        if (tcpFd[i] > maxFd) maxFd = tcpFd[i];
+    }
+
+    for (i = 0; i < MAX_UDPLISTEN; i++)
+    {
+        if (udpFwdList[i].fd > maxFd) maxFd = udpFwdList[i].fd;
+    }
+
+    return maxFd;
+}
+
 // server work
-void doServer(int fdT){
-    int cfd = 0, ret = 0, tcpCons=0, udpCons = 0, tcpCon[MAX_TCP];
+void doServer(int sfd){
+    int cfd = 0, ret = 0, tcpCons=0, udpCons = 0, tcpFd[MAX_TCP];
     char buf[MAXBUF] = "";
     fd_set base_rfds, rfds;
     sigset_t mask, oldmask;
     udpfwd_t udpFwdList[MAX_UDPLISTEN];
     
     // set all file descriptors to -1
-    for (int i = 0; i < MAX_TCP; i++) tcpCon[i] = -1;
+    for (int i = 0; i < MAX_TCP; i++) tcpFd[i] = -1;
     for (int i = 0; i < MAX_UDPLISTEN; i++) udpFwdList[i].fd = -1;
     
     // set base_rfds once and use in the loop to reset rfds
     FD_ZERO(&base_rfds);
-    FD_SET(fdT, &base_rfds);
+    FD_SET(sfd, &base_rfds);
     
     // set signal mask for pselect
     sigemptyset (&mask);
@@ -527,10 +544,10 @@ void doServer(int fdT){
     {
         rfds = base_rfds;
         
-        if (pselect(FD_SETSIZE, &rfds, NULL, NULL, NULL, &oldmask) > 0) // FD_SETSIZE bad??
+        if (pselect(getMaxFd(udpFwdList, tcpFd, sfd) + 1, &rfds, NULL, NULL, NULL, &oldmask) > 0) // FD_SETSIZE bad??
         {
             //  new client connection
-            if (FD_ISSET(fdT, &rfds) && (cfd = add_new_client(fdT)) > 0)
+            if (FD_ISSET(sfd, &rfds) && (cfd = add_new_client(sfd)) > 0)
             {
                 // if less than 3 clients add new client
                 if (tcpCons < 3)
@@ -538,9 +555,9 @@ void doServer(int fdT){
                     int added = 0;
                     for (int i = 0; i < MAX_TCP; i++) 
                     {
-                        if (tcpCon[i] == -1)
+                        if (tcpFd[i] == -1)
                         {
-                            tcpCon[i] = cfd;
+                            tcpFd[i] = cfd;
                             FD_SET(cfd, &base_rfds);
                             added = 1;
                             tcpCons++;
@@ -570,29 +587,29 @@ void doServer(int fdT){
             {
                 memset(buf, 0, sizeof(buf));
 
-                if (FD_ISSET(tcpCon[i], &rfds))
+                if (FD_ISSET(tcpFd[i], &rfds))
                 {
                     // if recv() call returns zero connection is closed on the other side
-                    if(recv(tcpCon[i], buf, MAXBUF, MSG_PEEK) == 0) 
+                    if(recv(tcpFd[i], buf, MAXBUF, MSG_PEEK) == 0) 
                     {
                         tcpCons--;
                         fprintf(stderr, "Client disconnected. Closing socket. [%d left]\n", tcpCons);
-                        FD_CLR(tcpCon[i], &base_rfds);
-                        if (TEMP_FAILURE_RETRY(close(tcpCon[i])) < 0) ERR("close");
-                        tcpCon[i] = -1;
+                        FD_CLR(tcpFd[i], &base_rfds);
+                        if (TEMP_FAILURE_RETRY(close(tcpFd[i])) < 0) ERR("close");
+                        tcpFd[i] = -1;
                     }
                     else // read and process message
                     {
-                        if ((ret = recv(tcpCon[i], buf, MAXBUF, 0)) < 0) ERR("recv"); 
+                        if ((ret = recv(tcpFd[i], buf, MAXBUF, 0)) < 0) ERR("recv"); 
                         buf[ret-2] = '\0'; // remove endline char
                         
                         if (DEBUG) fprintf(stderr, "RECEIVED MESSAGE: --%s-- with size %d\n", buf, ret);
                         
                         //process incoming message
-                        if((ret = process_msg(buf, udpFwdList, &base_rfds, tcpCon[i])) < 0) 
+                        if((ret = process_msg(buf, udpFwdList, &base_rfds, tcpFd[i])) < 0) 
                         {
                             // there's an error in message
-                            sendErrorMsg(tcpCon[i], ret);
+                            sendErrorMsg(tcpFd[i], ret);
                         }
                     }
                 }
@@ -641,8 +658,8 @@ void doServer(int fdT){
     // close open tcp sockets
     for (int i = 0; i < MAX_TCP; i++) 
     {
-        if (tcpCon[i] < 0) continue;
-        if (TEMP_FAILURE_RETRY(close(tcpCon[i])) < 0) ERR("close");
+        if (tcpFd[i] < 0) continue;
+        if (TEMP_FAILURE_RETRY(close(tcpFd[i])) < 0) ERR("close");
         tcpCons--;
         fprintf(stderr, "Closing tcp send socket. [%d left]\n", tcpCons);
     }
@@ -651,7 +668,7 @@ void doServer(int fdT){
 }
 
 int main(int argc, char** argv){
-    int fdT;
+    int sfd;
     int new_flags;
     
     if(argc!=2) 
@@ -664,17 +681,17 @@ int main(int argc, char** argv){
     if(sethandler(sigint_handler,SIGINT)) ERR("Seting SIGINT:");
     
     // make and bind tcp listen socket
-    fdT=bind_inet_socket(strtol(argv[1], NULL, 10), SOCK_STREAM);
+    sfd=bind_inet_socket(strtol(argv[1], NULL, 10), SOCK_STREAM);
     
     // set tcp listen socket to nonblocking
-    new_flags = fcntl(fdT, F_GETFL) | O_NONBLOCK;
-    fcntl(fdT, F_SETFL, new_flags);
+    new_flags = fcntl(sfd, F_GETFL) | O_NONBLOCK;
+    fcntl(sfd, F_SETFL, new_flags);
     
     // accept connections and read data
-    doServer(fdT);
+    doServer(sfd);
     
     // close tcp listen socket
-    if (TEMP_FAILURE_RETRY(close(fdT)) < 0) ERR("close");
+    if (TEMP_FAILURE_RETRY(close(sfd)) < 0) ERR("close");
     fprintf(stderr, "Closing tcp listen socket.\n");
     fprintf(stderr, "Server has terminated.\n");
     return EXIT_SUCCESS;
