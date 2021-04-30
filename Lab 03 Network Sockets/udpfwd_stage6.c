@@ -126,11 +126,69 @@ ssize_t bulk_write(int fd, char *buf, size_t count){
     return len;
 }
 
+int validateFwdAddr(char* fwdAddr)
+{
+    int i = 0;
+    char *subsubtoken, *str2, *saveptr3;
+    
+    if (fwdAddr[0] == '.' || fwdAddr[strlen(fwdAddr)] == '.') 
+    {
+        fprintf(stderr, "IP address format wrong.");
+        return -1;
+    }
+    
+    for(i = 1; i < strlen(fwdAddr) - 2; i++)
+    {
+        if (fwdAddr[i] != '.' || fwdAddr[i+1] != '.') continue;
+        fprintf(stderr, "IP address format wrong.");
+        return -1;
+    }
+    
+    for (i = 0, str2 = fwdAddr; ;i++, str2 = NULL) 
+    {
+        subsubtoken = strtok_r(str2, ".", &saveptr3);
+        if (subsubtoken == NULL)
+            break;
+
+        printf("      --> %s\n", subsubtoken);
+        
+        // check ip has 4 segments
+        if(i >= 4) 
+        {
+            fprintf(stderr, "Error in ip:port - ip has more than 4 parts!\n");
+            return -1;
+        }
+
+        // check each segment is a number
+        if(isnumeric(subsubtoken) < 0) 
+        {
+            fprintf(stderr, "Error in IP number - part of ip is not a number!\n");   
+            return -1;
+        }
+
+        // check each segment is < 256
+        if (strtol(subsubtoken, NULL, 10) > 255)
+        {
+            fprintf(stderr, "Error in IP number - part of ip is greater than 255!\n");
+            return -1;
+        }
+    }
+
+    // check ip has 4 segments
+    if(i < 4)
+    {
+        fprintf(stderr, "Error in ip:port - ip has less than 4 parts!\n");
+        return -1;
+    }
+
+    return 0;
+}
+
 // THIS FUNCTION IS TOO LONG!!!
 int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_rfds){
-    char *subtoken, *subsubtoken, *str, *str2, *saveptr2, *saveptr3;
+    char *subtoken, *str, *saveptr2;
     char fwdAddr[16] = "", fwdPort[6] = "", udpListen[6] = "";
-    int i = 0, j = 0, k = 0, m = 0, udpNo = 0, fwdNo = 0;
+    int i = 0, j = 0, udpNo = 0, fwdNo = 0;
 
     // check if MAX_UDPLISTEN limit is reached
     for (udpNo = 0; udpNo < MAX_UDPLISTEN; udpNo++)
@@ -226,57 +284,10 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
             //check ip format
             if (j == 0)
             {
+                if (validateFwdAddr(subtoken) < 0) return -1;
+
                 strncpy(fwdAddr, subtoken, strlen(subtoken));
                 printf("IP   --> %s\n", fwdAddr);
-
-                if (fwdAddr[0] == '.' || fwdAddr[strlen(fwdAddr)] == '.') 
-				{
-					fprintf(stderr, "IP address format wrong.");
-					return -1;
-				}
-				
-				for(m = 1; m < strlen(fwdAddr) - 2; m++)
-				{
-					if (fwdAddr[m] != '.' || fwdAddr[m+1] != '.') continue;
-					fprintf(stderr, "IP address format wrong.");
-					return -1;
-				}
-                
-                for (k = 0, str2 = subtoken; ;k++, str2 = NULL) 
-                {
-                    subsubtoken = strtok_r(str2, ".", &saveptr3);
-                    if (subsubtoken == NULL)
-                        break;
-
-                    printf("      --> %s\n", subsubtoken);
-                    
-                    // check ip has 4 segments
-                    if(k >= 4) 
-                    {
-                        fprintf(stderr, "Error in ip:port - ip has more than 4 parts!\n");
-                        return -1;
-                    }
-
-                    // check each segment is a number
-                    if(isnumeric(subsubtoken) < 0) 
-                    {
-                        fprintf(stderr, "Error in IP number - part of ip is not a number!\n");   
-                        return -1;
-                    }
-
-                    // check each segment is < 256
-                    if (strtol(subsubtoken, NULL, 10) > 255)
-                    {
-                        fprintf(stderr, "Error in IP number - part of ip is greater than 255!\n");
-                        return -1;
-                    }
-                }
-
-                if(k < 4)
-                {
-                    fprintf(stderr, "Error in ip:port - ip has less than 4 parts!\n");
-                    return -1;
-                }
             }
         }
 
