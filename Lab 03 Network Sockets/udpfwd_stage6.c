@@ -19,6 +19,16 @@
 #define MAX_UDPFWD 10       // max forward addresses per rule
 #define MAX_UDPLISTEN 10    // max forwarding rules allowed
 #define MAX_TCP 3           // max tcp clients allowed to connect
+// error codes
+#define INVLDCMD -10
+#define UDPLIMIT -11
+#define INVLDPRT -12
+#define DPLCTRUL -13
+#define FWDLIMIT -14
+#define MAKEADDR -15
+#define NOSOCKET -16
+#define INVLDIP  -17
+// ----------
 #define MAXBUF 65507
 #define BACKLOG 3
 #define ERR(source) (perror(source),\
@@ -135,14 +145,14 @@ int validateIp(char* ipAddr){
     if (ipAddr[0] == '.' || ipAddr[strlen(ipAddr)] == '.') 
     {
         fprintf(stderr, "IP address format wrong.");
-        return -1;
+        return INVLDIP;
     }
     
     for(i = 1; i < strlen(ipAddr) - 2; i++)
     {
         if (ipAddr[i] != '.' || ipAddr[i+1] != '.') continue;
         fprintf(stderr, "IP address format wrong.");
-        return -1;
+        return INVLDIP;
     }
     
     for (i = 0, str = ipAddr; ;i++, str = NULL) 
@@ -157,21 +167,21 @@ int validateIp(char* ipAddr){
         if(i >= 4) 
         {
             fprintf(stderr, "Error in ip:port - ip has more than 4 parts!\n");
-            return -1;
+            return INVLDIP;
         }
 
         // check each segment is a number
         if(isnumeric(token) < 0) 
         {
             fprintf(stderr, "Error in IP number - part of ip is not a number!\n");   
-            return -1;
+            return INVLDIP;
         }
 
         // check each segment is < 256
         if (strtol(token, NULL, 10) > 255)
         {
             fprintf(stderr, "Error in IP number - part of ip is greater than 255!\n");
-            return -1;
+            return INVLDIP;
         }
     }
 
@@ -179,7 +189,7 @@ int validateIp(char* ipAddr){
     if(i < 4)
     {
         fprintf(stderr, "Error in ip:port - ip has less than 4 parts!\n");
-        return -1;
+        return INVLDIP;
     }
 
     return 0;
@@ -191,13 +201,13 @@ int validatePort(char* portNo){
     if (isnumeric(portNo) < 0)
     {
         fprintf(stderr, "Port number should only contain digits!\n");
-        return -1;
+        return INVLDPRT;
     }
 
     if (strtol(portNo, NULL, 10) < 1024 || strtol(portNo, NULL, 10) > 65535)
     {
         fprintf(stderr, "Port number must be between 1024 and 65535.\n");
-        return -1;
+        return INVLDPRT;
     }
 
     return 0;
@@ -205,7 +215,7 @@ int validatePort(char* portNo){
 
 // check that given <ip:port> is valid
 int validateIpPort(char* ipPort, char*fwdAddr, char* fwdPort){
-    int i;
+    int i, ret;
     char *token, *str, *saveptr;
     
     for (i = 0, str = ipPort; ;i++, str = NULL) 
@@ -218,7 +228,7 @@ int validateIpPort(char* ipPort, char*fwdAddr, char* fwdPort){
         if(i >= 2) 
         {
             fprintf(stderr, "Error in ip:port!\n");
-            return -1;
+            return INVLDCMD;
         }
 
         // check port format
@@ -227,7 +237,7 @@ int validateIpPort(char* ipPort, char*fwdAddr, char* fwdPort){
             strncpy(fwdPort, token, strlen(token));
             fprintf(stderr, " PORT --> %s\n", fwdPort);
 
-            if (validatePort(token) < 0) return -1;
+            if ((ret = validatePort(token)) < 0) return ret;
         }
 
         //check ip format
@@ -236,14 +246,14 @@ int validateIpPort(char* ipPort, char*fwdAddr, char* fwdPort){
             strncpy(fwdAddr, token, strlen(token));
             fprintf(stderr, "IP   --> %s\n", fwdAddr);
 
-            if (validateIp(token) < 0) return -1;
+            if ((ret = validateIp(token)) < 0) return ret;
         }
     }
 
     if (i < 2) 
     {
         fprintf(stderr, "Error in ip:port - one argument missing!\n");
-        return -1;
+        return INVLDCMD;
     }
 
     return 0;
@@ -262,18 +272,18 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
     if (udpNo == MAX_UDPLISTEN) 
     {
         fprintf(stderr, "UDP rule limit reached! (max: %d)\n", MAX_UDPLISTEN);
-        return -1;
+        return UDPLIMIT;
     }
 
     // get port number to listen at
     if ((token = strtok_r(NULL, " ", &saveptr1)) == NULL)
     {
         fprintf(stderr, "fwd command parameters missing!\n");
-        return -1;
+        return INVLDCMD;
     }
      
     //check port number is ok
-    if (validatePort(token) < 0) return -1;
+    if (validatePort(token) < 0) return INVLDPRT;
 
     strncpy(udpListen, token, strlen(token));
     fprintf(stderr, "Listen port: -%s-\n", udpListen);
@@ -283,13 +293,13 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
         if (udpFwdList[j].fd != -1) fprintf(stderr, "%d, %s \n", j, udpFwdList[j].port);
 		if (udpFwdList[j].fd == -1 || strtol(udpListen, NULL, 10) != strtol(udpFwdList[j].port, NULL, 10)) continue;
         fprintf(stderr, "There's already a rule defined for this port! Close it first.\n");
-        return -1;
+        return DPLCTRUL;
     }
 
     // get ip:port to forward to
     while(1)
     {
-        int err=0;
+        int err=0, ret=0;
         
         token = strtok_r(NULL, " ", &saveptr1);
         if (token == NULL) break;
@@ -297,12 +307,12 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
         if (fwdNo == MAX_UDPFWD) 
         {
             fprintf(stderr, "UDP rule lists too many forward addresses (max:%d)!\n", MAX_UDPFWD);
-            return -1;
+            return FWDLIMIT;
         }
 
         // ip:port
         fprintf(stderr, "[%d] ip:port = %s\n", ++i, token);
-        if(validateIpPort(token, fwdAddr, fwdPort) < 0) return -1;
+        if((ret = validateIpPort(token, fwdAddr, fwdPort) < 0)) return ret;
 
         // <ip:port> has no errors, make address and add to forwarding list		
         fprintf(stderr, "[%d] %s:%s\n", fwdNo+1, fwdAddr, fwdPort);
@@ -310,7 +320,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
         if(err < 0) 
         {
             fprintf(stderr, "Cannot connect to %s:%s\n", fwdAddr, fwdPort);
-            return -1;
+            return MAKEADDR;
         }
 		strncpy(udpFwdList[udpNo].port, udpListen, 5);
 		strncpy(udpFwdList[udpNo].fwdAddr[fwdNo], fwdAddr, 16);
@@ -337,14 +347,14 @@ int process_close(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* bas
     if ((token = strtok_r(NULL, " ", &saveptr1)) == NULL)
     {
         fprintf(stderr, "Port number missing!\n");
-        return -1;
+        return INVLDCMD;
     }
     
     //check port number is a number
     if (isnumeric(token) < 0)
     {
         fprintf(stderr, "Error in udp listen port number!\n");
-        return -1;
+        return INVLDPRT;
     }
 
     strncpy(udpListen, token, strlen(token));
@@ -364,11 +374,11 @@ int process_close(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* bas
     }
 
     fprintf(stderr, "There's no open udp socket with port number %s\n", udpListen);
-    return -1;
+    return NOSOCKET;
 }
 
 // reply to <show> command
-void sendFwdInfo(int cfd, udpfwd_t* udpFwdList){
+int sendFwdInfo(int cfd, udpfwd_t* udpFwdList){
     char buf[MAXBUF] = "";
     int ruleNo = 0;
                             
@@ -399,6 +409,8 @@ void sendFwdInfo(int cfd, udpfwd_t* udpFwdList){
         memset(buf, 0, sizeof(buf));
         sprintf(buf, "\n");
         if(bulk_write(cfd, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
+
+        return 0;
     }
 }
 
@@ -411,20 +423,19 @@ int process_msg(char* msg, udpfwd_t* udpFwdList, fd_set* base_rfds, int cfd){
     if (strcmp(token, "fwd") == 0)
     {
         // stage 4
-        return(process_fwd(token, saveptr1, udpFwdList, base_rfds) < 0);        
+        return(process_fwd(token, saveptr1, udpFwdList, base_rfds));        
     }
     else if (strcmp(token, "close") == 0)
     {
         // stage 5
-        return(process_close(token, saveptr1, udpFwdList, base_rfds) < 0);
+        return(process_close(token, saveptr1, udpFwdList, base_rfds));
     }
     else if(strcmp(token, "show") == 0)
     {
         // stage 6
-        sendFwdInfo(cfd, udpFwdList);
-        return 0;
+        return(sendFwdInfo(cfd, udpFwdList));
     }
-    else return -1;	
+    else return INVLDCMD;	
 }
 
 // server work
