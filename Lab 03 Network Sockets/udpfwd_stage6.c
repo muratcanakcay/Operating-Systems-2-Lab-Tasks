@@ -52,19 +52,20 @@
 
 volatile sig_atomic_t do_work = 1;
 
+// info for each udp forwarding rule
 typedef struct udpfwd_t{
-    int fd;
+    int fd;                         // fd of the connection
     int fwdCount;                   // no. of forward addreses in this rule
-    char port[6];                   // port no. to listen on
-    char fwdAddr[MAX_UDPFWD][16]; 	// IPv4 address can be at most 16 chars (including periods)
-    char fwdPort[MAX_UDPFWD][6];	// Port number can be at most 65535 = 5 chars
+    char port[6];                   // port to listen on
+    char fwdAddr[MAX_UDPFWD][16]; 	// IPv4 address can be at most 15 chars (including periods)
+    char fwdPort[MAX_UDPFWD][6];	// port number can be at most 65535 = 5 chars
     struct sockaddr_in fwdList[MAX_UDPFWD];
 
 } udpfwd_t;
 void usage(char * name){
     fprintf(stderr,"USAGE: %s port\n", name);
 }
-int isnumeric(char* str){
+int isNumeric(char* str){
     for (int i = 0; i < strlen(str); i++)
     {
         if (!isdigit(str[i]))
@@ -73,6 +74,22 @@ int isnumeric(char* str){
         }
     }
     return 0;
+}
+// returns max of the open file descriptors
+int getMaxFd(udpfwd_t* udpFwdList, int* tcpFd, int sfd){
+    int i, maxFd = sfd;
+
+    for (i = 0; i < MAX_TCP; i++)
+    {
+        if (tcpFd[i] > maxFd) maxFd = tcpFd[i];
+    }
+
+    for (i = 0; i < MAX_UDPLISTEN; i++)
+    {
+        if (udpFwdList[i].fd > maxFd) maxFd = udpFwdList[i].fd;
+    }
+
+    return maxFd;
 }
 void sigint_handler(int sig) {
     do_work=0;
@@ -157,12 +174,14 @@ int validateIp(char* ipAddr){
     int i = 0;
     char *token, *str, *saveptr;
     
+    // check if it starts or ends with period
     if (ipAddr[0] == '.' || ipAddr[strlen(ipAddr)] == '.') 
     {
         if (DEBUG) fprintf(stderr, "IP address format wrong.");
         return INVLDIP;
     }
     
+    // check if it contains two adjacent periods
     for(i = 1; i < strlen(ipAddr) - 2; i++)
     {
         if (ipAddr[i] != '.' || ipAddr[i+1] != '.') continue;
@@ -170,6 +189,7 @@ int validateIp(char* ipAddr){
         return INVLDIP;
     }
     
+    // check the segments (this part can be reduced to very small in size by removing debug messages)
     for (i = 0, str = ipAddr; ;i++, str = NULL) 
     {
         token = strtok_r(str, ".", &saveptr);
@@ -179,14 +199,14 @@ int validateIp(char* ipAddr){
         if (DEBUG) fprintf(stderr, "      --> %s\n", token);
         
         // check ip has at most 4 segments
-        if(i >= 4) 
+        if (i >= 4) 
         {
             if (DEBUG) fprintf(stderr, "Error in ip:port - ip has more than 4 parts!\n");
             return INVLDIP;
         }
 
         // check each segment is a number
-        if(isnumeric(token) < 0) 
+        if (isNumeric(token) < 0) 
         {
             if (DEBUG) fprintf(stderr, "Error in IP number - part of ip is not a number!\n");   
             return INVLDIP;
@@ -201,7 +221,7 @@ int validateIp(char* ipAddr){
     }
 
     // check ip has at least 4 segments
-    if(i < 4)
+    if (i < 4)
     {
         if (DEBUG) fprintf(stderr, "Error in ip:port - ip has less than 4 parts!\n");
         return INVLDIP;
@@ -211,16 +231,16 @@ int validateIp(char* ipAddr){
 }
 
 // check that the given string is a valid port number
-int validatePort(char* portNo, int listenPort){
+int validatePort(char* portNo, bool listenPort){
     //check port is a number
-    if (isnumeric(portNo) < 0)
+    if (isNumeric(portNo) < 0)
     {
         if (DEBUG) fprintf(stderr, "Port number should only contain digits!\n");
         return INVLDPRT;
     }
 
     // listen port must be > 1024
-    if ( ( listenPort && (strtol(portNo, NULL, 10) < 1024)) || strtol(portNo, NULL, 10) > 65535)
+    if ( (listenPort && (strtol(portNo, NULL, 10) < 1024)) || strtol(portNo, NULL, 10) > 65535)
     {
         if (DEBUG) fprintf(stderr, "Port number must be between 1024 and 65535.\n");
         return INVLDPRT;
@@ -366,7 +386,7 @@ int process_close(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* bas
     }
     
     //check port number is a number
-    if (isnumeric(token) < 0)
+    if (isNumeric(token) < 0)
     {
         if (DEBUG) fprintf(stderr, "Error in udp listen port number!\n");
         return INVLDPRT;
@@ -498,23 +518,6 @@ int process_msg(char* msg, udpfwd_t* udpFwdList, fd_set* base_rfds, int cfd){
         return(sendFwdInfo(cfd, udpFwdList));
     }
     else return INVLDCMD;	
-}
-
-// returns max of the open file descriptors
-int getMaxFd(udpfwd_t* udpFwdList, int* tcpFd, int sfd){
-    int i, maxFd = sfd;
-
-    for (i = 0; i < MAX_TCP; i++)
-    {
-        if (tcpFd[i] > maxFd) maxFd = tcpFd[i];
-    }
-
-    for (i = 0; i < MAX_UDPLISTEN; i++)
-    {
-        if (udpFwdList[i].fd > maxFd) maxFd = udpFwdList[i].fd;
-    }
-
-    return maxFd;
 }
 
 // server work
@@ -677,8 +680,8 @@ int main(int argc, char** argv){
         return EXIT_FAILURE;
     }
 
-    if(sethandler(SIG_IGN,SIGPIPE)) ERR("Seting SIGPIPE:");
-    if(sethandler(sigint_handler,SIGINT)) ERR("Seting SIGINT:");
+    if(sethandler(SIG_IGN,SIGPIPE)) ERR("Setting SIGPIPE:");
+    if(sethandler(sigint_handler,SIGINT)) ERR("Setting SIGINT:");
     
     // make and bind tcp listen socket
     sfd=bind_inet_socket(strtol(argv[1], NULL, 10), SOCK_STREAM);
@@ -687,7 +690,7 @@ int main(int argc, char** argv){
     new_flags = fcntl(sfd, F_GETFL) | O_NONBLOCK;
     fcntl(sfd, F_SETFL, new_flags);
     
-    // accept connections and read data
+    // accept connections and start working!
     doServer(sfd);
     
     // close tcp listen socket
