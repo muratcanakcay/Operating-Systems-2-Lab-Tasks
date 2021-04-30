@@ -402,6 +402,8 @@ int sendFwdInfo(int cfd, udpfwd_t* udpFwdList){
     
     for (int j = 0; j < MAX_UDPLISTEN; j++)
     {
+        fprintf(stderr, "%d - %d\n", j, udpFwdList[j].fd);
+        
         if (udpFwdList[j].fd == -1) continue;
 
         ruleNo++;
@@ -423,8 +425,6 @@ int sendFwdInfo(int cfd, udpfwd_t* udpFwdList){
         memset(buf, 0, sizeof(buf));
         sprintf(buf, "\n");
         if(bulk_write(cfd, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
-
-        return 0;
     }
 
     return 0;
@@ -556,7 +556,7 @@ void doServer(int fdT){
                     memset(buf, 0, sizeof(buf));
                     
                     if (bulk_write(cfd, tcpfull, sizeof(tcpfull)) < 0 && errno!=EPIPE) ERR("write:");
-                    sprintf(buf, "(Max:%d)\n", MAX_UDPLISTEN);
+                    sprintf(buf, "(Max:%d)\n", MAX_TCP);
                     if(bulk_write(cfd, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
                     
                     if (DEBUG) fprintf(stderr, "Max. clients already connected (%d). Client connection request refused.\n", MAX_TCP);
@@ -576,9 +576,9 @@ void doServer(int fdT){
                     {
                         tcpCons--;
                         fprintf(stderr, "Client disconnected. Closing socket. [%d left]\n", tcpCons);
-                        tcpCon[i] = -1;
                         FD_CLR(tcpCon[i], &base_rfds);
                         if (TEMP_FAILURE_RETRY(close(tcpCon[i])) < 0) ERR("close");
+                        tcpCon[i] = -1;
                     }
                     else // read and process message
                     {
@@ -606,8 +606,8 @@ void doServer(int fdT){
                 {
                     //receive udp message
                     if((ret = recv(udpFwdList[i].fd, buf, MAXBUF, 0)) < 0) ERR("udp read");
-                    buf[ret-1] = '\0';
-                    if (DEBUG) fprintf(stderr, "%s\n", buf);
+                    buf[ret] = '\0';
+                    if (DEBUG) fprintf(stderr, "%s", buf);
 
                     // forward udp message
                     for (int j = 0; j < udpFwdList[i].fwdCount; j++)
