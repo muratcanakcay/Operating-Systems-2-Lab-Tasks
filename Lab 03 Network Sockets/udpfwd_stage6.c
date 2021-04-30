@@ -16,9 +16,9 @@
 #include <ctype.h>
 #include <stdbool.h>
 
-#define MAX_UDPFWD 10
-#define MAX_UDPLISTEN 10
-#define MAX_TCP 3
+#define MAX_UDPFWD 10       // max forward addresses per rule
+#define MAX_UDPLISTEN 10    // max forwarding rules allowed
+#define MAX_TCP 3           // max tcp clients allowed to connect
 #define MAXBUF 65507
 #define BACKLOG 3
 #define ERR(source) (perror(source),\
@@ -49,7 +49,6 @@ int isnumeric(char* str){
     }
     return 0;
 }
-void sendFwdInfo(int fdT, udpfwd_t* udpFwdList); // declaration
 void sigint_handler(int sig) {
     do_work=0;
 }
@@ -126,11 +125,10 @@ ssize_t bulk_write(int fd, char *buf, size_t count){
     return len;
 }
 
-// checks that the given string is a valid ip address
-int validateIp(char* ipAddr)
-{
+// check that the given string is a valid ip address
+int validateIp(char* ipAddr){
     int i = 0;
-    char *subsubtoken, *str2, *saveptr3;
+    char *token, *str, *saveptr;
     
     if (ipAddr[0] == '.' || ipAddr[strlen(ipAddr)] == '.') 
     {
@@ -145,13 +143,13 @@ int validateIp(char* ipAddr)
         return -1;
     }
     
-    for (i = 0, str2 = ipAddr; ;i++, str2 = NULL) 
+    for (i = 0, str = ipAddr; ;i++, str = NULL) 
     {
-        subsubtoken = strtok_r(str2, ".", &saveptr3);
-        if (subsubtoken == NULL)
+        token = strtok_r(str, ".", &saveptr);
+        if (token == NULL)
             break;
 
-        printf("      --> %s\n", subsubtoken);
+        printf("      --> %s\n", token);
         
         // check ip has at most 4 segments
         if(i >= 4) 
@@ -161,14 +159,14 @@ int validateIp(char* ipAddr)
         }
 
         // check each segment is a number
-        if(isnumeric(subsubtoken) < 0) 
+        if(isnumeric(token) < 0) 
         {
             fprintf(stderr, "Error in IP number - part of ip is not a number!\n");   
             return -1;
         }
 
         // check each segment is < 256
-        if (strtol(subsubtoken, NULL, 10) > 255)
+        if (strtol(token, NULL, 10) > 255)
         {
             fprintf(stderr, "Error in IP number - part of ip is greater than 255!\n");
             return -1;
@@ -185,9 +183,8 @@ int validateIp(char* ipAddr)
     return 0;
 }
 
-// checks that the given string is a valid port number
-int validatePort(char* portNo)
-{
+// check that the given string is a valid port number
+int validatePort(char* portNo){
     //check port is a number
     if (isnumeric(portNo) < 0)
     {
@@ -204,8 +201,8 @@ int validatePort(char* portNo)
     return 0;
 }
 
-int validateIpPort(char* ipPort, char*fwdAddr, char* fwdPort)
-{
+// check that given <ip:port> is valid
+int validateIpPort(char* ipPort, char*fwdAddr, char* fwdPort){
     int i;
     char *token, *str, *saveptr;
     
@@ -250,8 +247,8 @@ int validateIpPort(char* ipPort, char*fwdAddr, char* fwdPort)
     return 0;
 }
 
-int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_rfds)
-{
+// process <fwd> messages
+int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_rfds){
     char fwdAddr[16] = "", fwdPort[6] = "", udpListen[6] = "";
     int i = 0, j = 0, udpNo = 0, fwdNo = 0;
 
@@ -323,6 +320,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
     return 0;
 }
 
+// process <close> messages
 int process_close(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_rfds){
     int j = 0;
     char udpListen[6] = "";
@@ -361,35 +359,8 @@ int process_close(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* bas
     return -1;
 }
 
-int process_msg(char* msg, udpfwd_t* udpFwdList, fd_set* base_rfds, int cfd){
-    char *token, *saveptr1;
-    
-    token = strtok_r(msg, " ", &saveptr1);
-
-    if (strcmp(token, "fwd") == 0)
-    {
-        // stage 4
-        if(process_fwd(token, saveptr1, udpFwdList, base_rfds) < 0) return -1;
-        return 0;
-    }
-    else if (strcmp(token, "close") == 0)
-    {
-        // stage 5
-        if(process_close(token, saveptr1, udpFwdList, base_rfds) < 0) return -1;
-        return 0;
-    }
-    else if(strcmp(token, "show") == 0)
-    {
-        // stage 6
-        sendFwdInfo(cfd, udpFwdList);
-        return 0;
-    }
-    else return -1;	
-}
-
 // reply to <show> command
-void sendFwdInfo(int cfd, udpfwd_t* udpFwdList)
-{
+void sendFwdInfo(int cfd, udpfwd_t* udpFwdList){
     char buf[MAXBUF] = "";
     int ruleNo = 0;
                             
@@ -423,11 +394,37 @@ void sendFwdInfo(int cfd, udpfwd_t* udpFwdList)
     }
 }
 
-// pselect
-void doServer(int fdT)
-{
-    int cfd, ret, tcpCons=0, udpCons = 0, tcpCon[MAX_TCP];
-    char buf[MAXBUF];
+// process messages from clients
+int process_msg(char* msg, udpfwd_t* udpFwdList, fd_set* base_rfds, int cfd){
+    char *token, *saveptr1;
+    
+    token = strtok_r(msg, " ", &saveptr1);
+
+    if (strcmp(token, "fwd") == 0)
+    {
+        // stage 4
+        if(process_fwd(token, saveptr1, udpFwdList, base_rfds) < 0) return -1;
+        return 0;
+    }
+    else if (strcmp(token, "close") == 0)
+    {
+        // stage 5
+        if(process_close(token, saveptr1, udpFwdList, base_rfds) < 0) return -1;
+        return 0;
+    }
+    else if(strcmp(token, "show") == 0)
+    {
+        // stage 6
+        sendFwdInfo(cfd, udpFwdList);
+        return 0;
+    }
+    else return -1;	
+}
+
+// server work
+void doServer(int fdT){
+    int cfd = 0, ret = 0, tcpCons=0, udpCons = 0, tcpCon[MAX_TCP];
+    char buf[MAXBUF+1] = "";
     char hello[] = "Hello message\n";
     char full[] = "Max no of clients reached. Connection not accepted.\n";
     char msgerror[] = "Invalid command. Please check and try again.\n";
@@ -509,7 +506,7 @@ void doServer(int fdT)
                         fprintf(stderr, "RECEIVED: --%s-- with size %d\n", buf, ret);
                         
                         //process incoming message
-                        if((ret = process_msg(buf, udpFwdList, &base_rfds, tcpCon[i])) < 0) 
+                        if((process_msg(buf, udpFwdList, &base_rfds, tcpCon[i])) < 0) 
                         {
                             // there's an error in message
                             if(bulk_write(tcpCon[i], msgerror, sizeof(msgerror)) < 0 && errno!=EPIPE) ERR("write:");
@@ -568,8 +565,7 @@ void doServer(int fdT)
     sigprocmask (SIG_UNBLOCK, &mask, NULL);
 }
 
-int main(int argc, char** argv)
-{
+int main(int argc, char** argv){
     int fdT;
     int new_flags;
     
