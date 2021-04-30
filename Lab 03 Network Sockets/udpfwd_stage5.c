@@ -467,7 +467,7 @@ void doServer(int fdT)
                 if (tcpCons < 3)
                 {
                     int added = 0;
-                    for (int i = 0; i < BACKLOG; i++) 
+                    for (int i = 0; i < MAX_TCP; i++) 
                     {
                         if (tcpCon[i] == -1)
                         {
