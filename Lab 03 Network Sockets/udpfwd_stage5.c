@@ -217,11 +217,11 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
                     }
                 }
 
-				if (atoi(token) > 65535)
-				{
-					fprintf(stderr, "udp listen port number cannot be larger than 65535!\n");
-					return -1;
-				}
+				if (atoi(subtoken) < 1025 || atoi(subtoken) > 65535)
+                {
+                    fprintf(stderr, "Port number must be between 1025 and 65535.\n");
+                    return -1;
+                }
 
                 strncpy(fwdPort, subtoken, strlen(subtoken));
                 printf(" PORT --> %s\n", fwdPort);
