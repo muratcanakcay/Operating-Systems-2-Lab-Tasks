@@ -126,43 +126,26 @@ ssize_t bulk_write(int fd, char *buf, size_t count){
     return len;
 }
 
-int validatePort(char* portNo)
-{
-    //check port is a number
-    if (isnumeric(portNo) < 0)
-    {
-        fprintf(stderr, "Error in ip:port - port is not a number!\n");
-        return -1;
-    }
-
-    if (strtol(portNo, NULL, 10) < 1024 || strtol(portNo, NULL, 10) > 65535)
-    {
-        fprintf(stderr, "Port number must be between 1024 and 65535.\n");
-        return -1;
-    }
-
-    return 0;
-}
-
-int validateIp(char* fwdAddr)
+// checks that the given string is a valid ip address
+int validateIp(char* ipAddr)
 {
     int i = 0;
     char *subsubtoken, *str2, *saveptr3;
     
-    if (fwdAddr[0] == '.' || fwdAddr[strlen(fwdAddr)] == '.') 
+    if (ipAddr[0] == '.' || ipAddr[strlen(ipAddr)] == '.') 
     {
         fprintf(stderr, "IP address format wrong.");
         return -1;
     }
     
-    for(i = 1; i < strlen(fwdAddr) - 2; i++)
+    for(i = 1; i < strlen(ipAddr) - 2; i++)
     {
-        if (fwdAddr[i] != '.' || fwdAddr[i+1] != '.') continue;
+        if (ipAddr[i] != '.' || ipAddr[i+1] != '.') continue;
         fprintf(stderr, "IP address format wrong.");
         return -1;
     }
     
-    for (i = 0, str2 = fwdAddr; ;i++, str2 = NULL) 
+    for (i = 0, str2 = ipAddr; ;i++, str2 = NULL) 
     {
         subsubtoken = strtok_r(str2, ".", &saveptr3);
         if (subsubtoken == NULL)
@@ -170,7 +153,7 @@ int validateIp(char* fwdAddr)
 
         printf("      --> %s\n", subsubtoken);
         
-        // check ip has 4 segments
+        // check ip has at most 4 segments
         if(i >= 4) 
         {
             fprintf(stderr, "Error in ip:port - ip has more than 4 parts!\n");
@@ -192,7 +175,7 @@ int validateIp(char* fwdAddr)
         }
     }
 
-    // check ip has 4 segments
+    // check ip has at least 4 segments
     if(i < 4)
     {
         fprintf(stderr, "Error in ip:port - ip has less than 4 parts!\n");
@@ -202,13 +185,79 @@ int validateIp(char* fwdAddr)
     return 0;
 }
 
-// THIS FUNCTION IS TOO LONG!!!
-int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_rfds){
-    char *subtoken, *str, *saveptr2;
+// checks that the given string is a valid port number
+int validatePort(char* portNo)
+{
+    //check port is a number
+    if (isnumeric(portNo) < 0)
+    {
+        fprintf(stderr, "Port number should only contain digits!\n");
+        return -1;
+    }
+
+    if (strtol(portNo, NULL, 10) < 1024 || strtol(portNo, NULL, 10) > 65535)
+    {
+        fprintf(stderr, "Port number must be between 1024 and 65535.\n");
+        return -1;
+    }
+
+    return 0;
+}
+
+int validateIpPort(char* ipPort, char*fwdAddr, char* fwdPort)
+{
+    int i;
+    char *token, *str, *saveptr;
+    
+    for (i = 0, str = ipPort; ;i++, str = NULL) 
+    {
+        token = strtok_r(str, ":", &saveptr);
+        if (token == NULL)
+            break;
+
+        // check <ip:port> has only 2 segments
+        if(i >= 2) 
+        {
+            fprintf(stderr, "Error in ip:port!\n");
+            return -1;
+        }
+
+        // check port format
+        if (i == 1)
+        {	
+            if (validatePort(token) < 0) return -1;
+
+            strncpy(fwdPort, token, strlen(token));
+            printf(" PORT --> %s\n", fwdPort);
+        }
+
+        //check ip format
+        if (i == 0)
+        {
+            if (validateIp(token) < 0) return -1;
+
+            strncpy(fwdAddr, token, strlen(token));
+            printf("IP   --> %s\n", fwdAddr);
+        }
+    }
+
+    if (i < 2) 
+    {
+        fprintf(stderr, "Error in ip:port - one argument missing!\n");
+        return -1;
+    }
+
+    return 0;
+}
+
+
+int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_rfds)
+{
     char fwdAddr[16] = "", fwdPort[6] = "", udpListen[6] = "";
     int i = 0, j = 0, udpNo = 0, fwdNo = 0;
 
-    // check if MAX_UDPLISTEN limit is reached
+    // MIGHT NOT BE CHECKING THE LAST FD!!!!
+    // check if MAX_UDPLISTEN limit is reached 
     for (udpNo = 0; udpNo < MAX_UDPLISTEN; udpNo++)
         if (udpFwdList[udpNo].fd == -1) break;
     
@@ -226,18 +275,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
     }
      
     //check port number is ok
-    for (j = 0; token[j] != '\0'; j++)
-    {
-        if (isdigit(token[j])) continue;
-        fprintf(stderr, "Error in udp listen port number!\n");
-        return -1;
-    }
-
-	if (strtol(token, NULL, 10) < 1024 || strtol(token, NULL, 10) > 65535)
-	{
-		fprintf(stderr, "Port number must be between 1024 and 65535.\n");
-        return -1;
-	}
+    if (validatePort(token) < 0) return -1;
 
     strncpy(udpListen, token, strlen(token));
     fprintf(stderr, "Listen port: -%s-\n", udpListen);
@@ -264,47 +302,11 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
 
         // ip:port
         fprintf(stderr, "[%d] ip:port = %s\n", ++i, token);
-
-        for (j = 0, str = token; ;j++, str = NULL) 
-        {
-            subtoken = strtok_r(str, ":", &saveptr2);
-            if (subtoken == NULL)
-                break;
-
-            // check <ip:port> has only 2 segments
-            if(j >= 2) 
-            {
-                fprintf(stderr, "Error in ip:port!\n");
-                return -1;
-            }
-
-            // check port format
-            if (j == 1)
-            {	
-                if (validatePort(subtoken) < 0) return -1;
-
-                strncpy(fwdPort, subtoken, strlen(subtoken));
-                printf(" PORT --> %s\n", fwdPort);
-            }
-
-            //check ip format
-            if (j == 0)
-            {
-                if (validateIp(subtoken) < 0) return -1;
-
-                strncpy(fwdAddr, subtoken, strlen(subtoken));
-                printf("IP   --> %s\n", fwdAddr);
-            }
-        }
-
-        if (j < 2) 
-        {
-            fprintf(stderr, "Error in ip:port - one argument missing!\n");
-            return -1;
-        }
+        if(validateIpPort(token, fwdAddr, fwdPort) < 0) return -1;
 
         // <ip:port> has no errors, make address and add to forwarding list		
         printf("[%d] %s:%s\n", fwdNo+1, fwdAddr, fwdPort);
+        
         udpFwdList[udpNo].fwdList[fwdNo] = make_address(fwdAddr, fwdPort);
 		strncpy(udpFwdList[udpNo].port, udpListen, 5);
 		strncpy(udpFwdList[udpNo].fwdAddr[fwdNo], fwdAddr, 16);
