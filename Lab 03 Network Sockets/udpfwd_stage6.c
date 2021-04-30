@@ -326,7 +326,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
     //check for duplicate rule
     for (j = 0; j < MAX_UDPLISTEN; j++)
     {
-		if (udpFwdList[j].fd == -1 || strtol(udpListen, NULL, 10) != strtol(udpFwdList[j].port, NULL, 10)) continue;
+        if (udpFwdList[j].fd == -1 || strtol(udpListen, NULL, 10) != strtol(udpFwdList[j].port, NULL, 10)) continue;
         if (DEBUG) fprintf(stderr, "There's already a rule defined for this port! Close it first.\n");
         return DPLCTRUL;
     }
@@ -357,9 +357,9 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
             if (DEBUG) fprintf(stderr, "Cannot connect to %s:%s\n", fwdAddr, fwdPort);
             return MAKEADDR;
         }
-		strncpy(udpFwdList[udpNo].port, udpListen, 5);
-		strncpy(udpFwdList[udpNo].fwdAddr[fwdNo], fwdAddr, 16);
-		strncpy(udpFwdList[udpNo].fwdPort[fwdNo], fwdPort, 5) ;
+        strncpy(udpFwdList[udpNo].port, udpListen, 5);
+        strncpy(udpFwdList[udpNo].fwdAddr[fwdNo], fwdAddr, 16);
+        strncpy(udpFwdList[udpNo].fwdPort[fwdNo], fwdPort, 5) ;
         udpFwdList[udpNo].fwdCount = ++fwdNo;
     }
 
