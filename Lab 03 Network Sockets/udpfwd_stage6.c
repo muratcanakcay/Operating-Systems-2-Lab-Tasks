@@ -16,9 +16,11 @@
 #include <ctype.h>
 #include <stdbool.h>
 
-#define MAX_UDPFWD 10       // max forward addresses per rule
-#define MAX_UDPLISTEN 10    // max forwarding rules allowed
-#define MAX_TCP 3           // max tcp clients allowed to connect
+#define DEBUG 1            // show/hide debug messages on server
+
+#define MAX_UDPFWD 2       // max forward addresses per rule
+#define MAX_UDPLISTEN 2    // max forwarding rules allowed
+#define MAX_TCP 3          // max tcp clients allowed to connect
 // error codes
 #define INVLDCMD -10
 #define UDPLIMIT -11
@@ -28,6 +30,19 @@
 #define MAKEADDR -15
 #define NOSOCKET -16
 #define INVLDIP  -17
+// client messages
+#define invldcmd "Invalid command. Please check and try again.\n"
+#define udplimit "Max. no. of rules reached. Close a connection to add a new rule."
+#define invldprt "Port number is not valid. Please check and try again.\n"
+#define dplctrul "A forwarding rule for this port already exists. Close it first.\n"
+#define fwdlimit "Too many forwarding addresses given."
+#define makeaddr "Cannot connect to ip address. Please check and try again.\n"
+#define nosocket "There's no rule defined for the given port.\n"
+#define invldip  "Invalid ip address format. Please check and try again.\n"
+#define sockopen "Rule created.\n"
+#define sckclose "Rule deleted.\n"
+#define hellomsg "Hello message\n"
+#define tcpfull  "Max no of clients reached. Connection not accepted."
 // ----------
 #define MAXBUF 65507
 #define BACKLOG 3
@@ -144,14 +159,14 @@ int validateIp(char* ipAddr){
     
     if (ipAddr[0] == '.' || ipAddr[strlen(ipAddr)] == '.') 
     {
-        fprintf(stderr, "IP address format wrong.");
+        if (DEBUG) fprintf(stderr, "IP address format wrong.");
         return INVLDIP;
     }
     
     for(i = 1; i < strlen(ipAddr) - 2; i++)
     {
         if (ipAddr[i] != '.' || ipAddr[i+1] != '.') continue;
-        fprintf(stderr, "IP address format wrong.");
+        if (DEBUG) fprintf(stderr, "IP address format wrong.");
         return INVLDIP;
     }
     
@@ -161,26 +176,26 @@ int validateIp(char* ipAddr){
         if (token == NULL)
             break;
 
-        fprintf(stderr, "      --> %s\n", token);
+        if (DEBUG) fprintf(stderr, "      --> %s\n", token);
         
         // check ip has at most 4 segments
         if(i >= 4) 
         {
-            fprintf(stderr, "Error in ip:port - ip has more than 4 parts!\n");
+            if (DEBUG) fprintf(stderr, "Error in ip:port - ip has more than 4 parts!\n");
             return INVLDIP;
         }
 
         // check each segment is a number
         if(isnumeric(token) < 0) 
         {
-            fprintf(stderr, "Error in IP number - part of ip is not a number!\n");   
+            if (DEBUG) fprintf(stderr, "Error in IP number - part of ip is not a number!\n");   
             return INVLDIP;
         }
 
         // check each segment is < 256
         if (strtol(token, NULL, 10) > 255)
         {
-            fprintf(stderr, "Error in IP number - part of ip is greater than 255!\n");
+            if (DEBUG) fprintf(stderr, "Error in IP number - part of ip is greater than 255!\n");
             return INVLDIP;
         }
     }
@@ -188,7 +203,7 @@ int validateIp(char* ipAddr){
     // check ip has at least 4 segments
     if(i < 4)
     {
-        fprintf(stderr, "Error in ip:port - ip has less than 4 parts!\n");
+        if (DEBUG) fprintf(stderr, "Error in ip:port - ip has less than 4 parts!\n");
         return INVLDIP;
     }
 
@@ -200,13 +215,13 @@ int validatePort(char* portNo){
     //check port is a number
     if (isnumeric(portNo) < 0)
     {
-        fprintf(stderr, "Port number should only contain digits!\n");
+        if (DEBUG) fprintf(stderr, "Port number should only contain digits!\n");
         return INVLDPRT;
     }
 
     if (strtol(portNo, NULL, 10) < 1024 || strtol(portNo, NULL, 10) > 65535)
     {
-        fprintf(stderr, "Port number must be between 1024 and 65535.\n");
+        if (DEBUG) fprintf(stderr, "Port number must be between 1024 and 65535.\n");
         return INVLDPRT;
     }
 
@@ -227,7 +242,7 @@ int validateIpPort(char* ipPort, char*fwdAddr, char* fwdPort){
         // check <ip:port> has only 2 segments
         if(i >= 2) 
         {
-            fprintf(stderr, "Error in ip:port!\n");
+            if (DEBUG) fprintf(stderr, "Error in ip:port!\n");
             return INVLDCMD;
         }
 
@@ -235,7 +250,7 @@ int validateIpPort(char* ipPort, char*fwdAddr, char* fwdPort){
         if (i == 1)
         {	
             strncpy(fwdPort, token, strlen(token));
-            fprintf(stderr, " PORT --> %s\n", fwdPort);
+            if (DEBUG) fprintf(stderr, " PORT --> %s\n", fwdPort);
 
             if ((ret = validatePort(token)) < 0) return ret;
         }
@@ -244,7 +259,7 @@ int validateIpPort(char* ipPort, char*fwdAddr, char* fwdPort){
         if (i == 0)
         {
             strncpy(fwdAddr, token, strlen(token));
-            fprintf(stderr, "IP   --> %s\n", fwdAddr);
+            if (DEBUG) fprintf(stderr, " IP   --> %s\n", fwdAddr);
 
             if ((ret = validateIp(token)) < 0) return ret;
         }
@@ -252,7 +267,7 @@ int validateIpPort(char* ipPort, char*fwdAddr, char* fwdPort){
 
     if (i < 2) 
     {
-        fprintf(stderr, "Error in ip:port - one argument missing!\n");
+        if (DEBUG) fprintf(stderr, "Error in ip:port - one argument missing!\n");
         return INVLDCMD;
     }
 
@@ -264,21 +279,20 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
     char fwdAddr[16] = "", fwdPort[6] = "", udpListen[6] = "";
     int i = 0, j = 0, udpNo = 0, fwdNo = 0;
 
-    // MIGHT NOT BE CHECKING THE LAST FD!!!!
     // check if MAX_UDPLISTEN limit is reached 
     for (udpNo = 0; udpNo < MAX_UDPLISTEN; udpNo++)
         if (udpFwdList[udpNo].fd == -1) break;
     
     if (udpNo == MAX_UDPLISTEN) 
     {
-        fprintf(stderr, "UDP rule limit reached! (max: %d)\n", MAX_UDPLISTEN);
+        if (DEBUG) fprintf(stderr, "UDP rule limit reached! (max: %d)\n", MAX_UDPLISTEN);
         return UDPLIMIT;
     }
 
     // get port number to listen at
     if ((token = strtok_r(NULL, " ", &saveptr1)) == NULL)
     {
-        fprintf(stderr, "fwd command parameters missing!\n");
+        if (DEBUG) fprintf(stderr, "fwd command parameters missing!\n");
         return INVLDCMD;
     }
      
@@ -286,17 +300,17 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
     if (validatePort(token) < 0) return INVLDPRT;
 
     strncpy(udpListen, token, strlen(token));
-    fprintf(stderr, "Listen port: -%s-\n", udpListen);
+    if (DEBUG) fprintf(stderr, "Listen port: -%s-\n", udpListen);
 
+    //check for duplicate rule
     for (j = 0; j < MAX_UDPLISTEN; j++)
     {
-        if (udpFwdList[j].fd != -1) fprintf(stderr, "%d, %s \n", j, udpFwdList[j].port);
 		if (udpFwdList[j].fd == -1 || strtol(udpListen, NULL, 10) != strtol(udpFwdList[j].port, NULL, 10)) continue;
-        fprintf(stderr, "There's already a rule defined for this port! Close it first.\n");
+        if (DEBUG) fprintf(stderr, "There's already a rule defined for this port! Close it first.\n");
         return DPLCTRUL;
     }
 
-    // get ip:port to forward to
+    // process each <ip:port> to forward to
     while(1)
     {
         int err=0, ret=0;
@@ -306,20 +320,20 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
 
         if (fwdNo == MAX_UDPFWD) 
         {
-            fprintf(stderr, "UDP rule lists too many forward addresses (max:%d)!\n", MAX_UDPFWD);
+            if (DEBUG) fprintf(stderr, "UDP rule lists too many forward addresses (max:%d)!\n", MAX_UDPFWD);
             return FWDLIMIT;
         }
 
         // ip:port
-        fprintf(stderr, "[%d] ip:port = %s\n", ++i, token);
-        if((ret = validateIpPort(token, fwdAddr, fwdPort) < 0)) return ret;
+        if (DEBUG) fprintf(stderr, "[%d] ip:port = %s\n", ++i, token);
+        if((ret = validateIpPort(token, fwdAddr, fwdPort)) < 0) return ret;
 
         // <ip:port> has no errors, make address and add to forwarding list		
-        fprintf(stderr, "[%d] %s:%s\n", fwdNo+1, fwdAddr, fwdPort);
+        if (DEBUG) fprintf(stderr, "[%d] %s:%s\n", fwdNo+1, fwdAddr, fwdPort);
         udpFwdList[udpNo].fwdList[fwdNo] = make_address(fwdAddr, fwdPort, &err);
         if(err < 0) 
         {
-            fprintf(stderr, "Cannot connect to %s:%s\n", fwdAddr, fwdPort);
+            if (DEBUG) fprintf(stderr, "Cannot connect to %s:%s\n", fwdAddr, fwdPort);
             return MAKEADDR;
         }
 		strncpy(udpFwdList[udpNo].port, udpListen, 5);
@@ -333,7 +347,7 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
     udpFwdList[udpNo].fd = udpFd;
     FD_SET(udpFwdList[udpNo].fd, base_rfds);
 
-    fprintf(stderr, "Forward addresses in the rule: %d\n", udpFwdList[udpNo].fwdCount);
+    if (DEBUG) fprintf(stderr, "Forward addresses in the rule: %d\n", udpFwdList[udpNo].fwdCount);
 
     return 0;
 }
@@ -346,19 +360,19 @@ int process_close(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* bas
     // get port number to close
     if ((token = strtok_r(NULL, " ", &saveptr1)) == NULL)
     {
-        fprintf(stderr, "Port number missing!\n");
+        if (DEBUG) fprintf(stderr, "Port number missing!\n");
         return INVLDCMD;
     }
     
     //check port number is a number
     if (isnumeric(token) < 0)
     {
-        fprintf(stderr, "Error in udp listen port number!\n");
+        if (DEBUG) fprintf(stderr, "Error in udp listen port number!\n");
         return INVLDPRT;
     }
 
     strncpy(udpListen, token, strlen(token));
-    fprintf(stderr, "Listen port to close: -%s-\n", udpListen);
+    if (DEBUG) fprintf(stderr, "Listen port to close: -%s-\n", udpListen);
     
     for (j = 0; j < MAX_UDPLISTEN; j++)
     {
@@ -369,11 +383,11 @@ int process_close(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* bas
         FD_CLR(udpFwdList[j].fd, base_rfds);
         if (TEMP_FAILURE_RETRY(close(udpFwdList[j].fd)) < 0) ERR("close");
         udpFwdList[j].fd = -1;
-        fprintf(stderr, "Socket closed\n");
+        if (DEBUG) fprintf(stderr, "Socket closed\n");
         return 0;
     }
 
-    fprintf(stderr, "There's no open udp socket with port number %s\n", udpListen);
+    if (DEBUG) fprintf(stderr, "There's no open udp socket with port number %s\n", udpListen);
     return NOSOCKET;
 }
 
@@ -412,10 +426,50 @@ int sendFwdInfo(int cfd, udpfwd_t* udpFwdList){
 
         return 0;
     }
+
+    return 0;
+}
+
+// send error message to client
+void sendErrorMsg(int cfd, int errCode){
+    char buf[11] = "";
+
+    switch (errCode)
+    {
+        case INVLDCMD:
+            if(bulk_write(cfd, invldcmd, sizeof(invldcmd)) < 0 && errno!=EPIPE) ERR("write:");
+            break;
+        case UDPLIMIT:
+            if(bulk_write(cfd, udplimit, sizeof(udplimit)) < 0 && errno!=EPIPE) ERR("write:");
+            sprintf(buf, "(Max:%d)\n", MAX_UDPLISTEN);
+            if(bulk_write(cfd, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
+            break;
+        case INVLDPRT:
+            if(bulk_write(cfd, invldprt, sizeof(invldprt)) < 0 && errno!=EPIPE) ERR("write:");
+            break;
+        case DPLCTRUL:
+            if(bulk_write(cfd, dplctrul, sizeof(dplctrul)) < 0 && errno!=EPIPE) ERR("write:");
+            break;
+        case FWDLIMIT:
+            if(bulk_write(cfd, fwdlimit, sizeof(fwdlimit)) < 0 && errno!=EPIPE) ERR("write:");
+            sprintf(buf, "(Max:%d)\n", MAX_UDPFWD);
+            if(bulk_write(cfd, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
+            break;
+        case MAKEADDR:
+            if(bulk_write(cfd, makeaddr, sizeof(makeaddr)) < 0 && errno!=EPIPE) ERR("write:");
+            break;
+        case NOSOCKET:
+            if(bulk_write(cfd, nosocket, sizeof(nosocket)) < 0 && errno!=EPIPE) ERR("write:");
+            break;
+        case INVLDIP:
+            if(bulk_write(cfd, invldip, sizeof(invldip)) < 0 && errno!=EPIPE) ERR("write:");
+            break;
+    }
 }
 
 // process messages from clients
 int process_msg(char* msg, udpfwd_t* udpFwdList, fd_set* base_rfds, int cfd){
+    int ret;
     char *token, *saveptr1;
     
     token = strtok_r(msg, " ", &saveptr1);
@@ -423,12 +477,19 @@ int process_msg(char* msg, udpfwd_t* udpFwdList, fd_set* base_rfds, int cfd){
     if (strcmp(token, "fwd") == 0)
     {
         // stage 4
-        return(process_fwd(token, saveptr1, udpFwdList, base_rfds));        
+        if ((ret = process_fwd(token, saveptr1, udpFwdList, base_rfds)) < 0) return ret;
+        
+        if(bulk_write(cfd, sockopen, sizeof(sockopen)) < 0 && errno!=EPIPE) ERR("write:");
+        return 0;
+        
     }
     else if (strcmp(token, "close") == 0)
     {
         // stage 5
-        return(process_close(token, saveptr1, udpFwdList, base_rfds));
+        if ((ret = process_close(token, saveptr1, udpFwdList, base_rfds)) < 0) return ret;
+        
+        if(bulk_write(cfd, sckclose, sizeof(sckclose)) < 0 && errno!=EPIPE) ERR("write:");
+        return 0;
     }
     else if(strcmp(token, "show") == 0)
     {
@@ -441,10 +502,7 @@ int process_msg(char* msg, udpfwd_t* udpFwdList, fd_set* base_rfds, int cfd){
 // server work
 void doServer(int fdT){
     int cfd = 0, ret = 0, tcpCons=0, udpCons = 0, tcpCon[MAX_TCP];
-    char buf[MAXBUF+1] = "";
-    char hello[] = "Hello message\n";
-    char full[] = "Max no of clients reached. Connection not accepted.\n";
-    char msgerror[] = "Invalid command. Please check and try again.\n";
+    char buf[MAXBUF] = "";
     fd_set base_rfds, rfds;
     sigset_t mask, oldmask;
     udpfwd_t udpFwdList[MAX_UDPLISTEN];
@@ -484,23 +542,29 @@ void doServer(int fdT){
                             tcpCon[i] = cfd;
                             FD_SET(cfd, &base_rfds);
                             added = 1;
-                            fprintf(stderr, "Client connected. [%d]\n", ++tcpCons);
+                            tcpCons++;
+                            fprintf(stderr, "Client connected. [%d]\n", tcpCons);
                             break;
                         }
                     }
                     if (!added) ERR("Connection add error");
                     
-                    if(bulk_write(cfd, hello, sizeof(hello)) < 0 && errno!=EPIPE) ERR("write:");
+                    if(bulk_write(cfd, hellomsg, sizeof(hellomsg)) < 0 && errno!=EPIPE) ERR("write:");
                 }
                 else // max. clients reached. send info msg.
                 {
-                    if (bulk_write(cfd, full, sizeof(full)) < 0 && errno!=EPIPE) ERR("write:");
-                    fprintf(stderr, "Client connection request refused.\n");
+                    memset(buf, 0, sizeof(buf));
+                    
+                    if (bulk_write(cfd, tcpfull, sizeof(tcpfull)) < 0 && errno!=EPIPE) ERR("write:");
+                    sprintf(buf, "(Max:%d)\n", MAX_UDPLISTEN);
+                    if(bulk_write(cfd, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
+                    
+                    if (DEBUG) fprintf(stderr, "Max. clients already connected (%d). Client connection request refused.\n", MAX_TCP);
                     if (TEMP_FAILURE_RETRY(close(cfd)) < 0) ERR("close");
                 }            
             }        
             
-            // check incoming tcp
+            // check incoming tcp message
             for (int i = 0; i < MAX_TCP; i++)
             {
                 memset(buf, 0, sizeof(buf));
@@ -510,29 +574,30 @@ void doServer(int fdT){
                     // if recv() call returns zero connection is closed on the other side
                     if(recv(tcpCon[i], buf, MAXBUF, MSG_PEEK) == 0) 
                     {
-                        fprintf(stderr, "Client disconnected. Closing socket. [%d left]\n", --tcpCons);
+                        tcpCons--;
+                        fprintf(stderr, "Client disconnected. Closing socket. [%d left]\n", tcpCons);
                         tcpCon[i] = -1;
                         FD_CLR(tcpCon[i], &base_rfds);
                         if (TEMP_FAILURE_RETRY(close(tcpCon[i])) < 0) ERR("close");
                     }
-                    else 
+                    else // read and process message
                     {
                         if ((ret = recv(tcpCon[i], buf, MAXBUF, 0)) < 0) ERR("recv"); 
                         buf[ret-2] = '\0'; // remove endline char
                         
-                        fprintf(stderr, "RECEIVED: --%s-- with size %d\n", buf, ret);
+                        if (DEBUG) fprintf(stderr, "RECEIVED MESSAGE: --%s-- with size %d\n", buf, ret);
                         
                         //process incoming message
-                        if((process_msg(buf, udpFwdList, &base_rfds, tcpCon[i])) < 0) 
+                        if((ret = process_msg(buf, udpFwdList, &base_rfds, tcpCon[i])) < 0) 
                         {
                             // there's an error in message
-                            if(bulk_write(tcpCon[i], msgerror, sizeof(msgerror)) < 0 && errno!=EPIPE) ERR("write:");
+                            sendErrorMsg(tcpCon[i], ret);
                         }
                     }
                 }
             }
 
-            // check incoming udp 
+            // check incoming udp message
             for (int i = 0; i < MAX_UDPLISTEN; i++)
             {
                 memset(buf, 0, sizeof(buf));
@@ -541,8 +606,8 @@ void doServer(int fdT){
                 {
                     //receive udp message
                     if((ret = recv(udpFwdList[i].fd, buf, MAXBUF, 0)) < 0) ERR("udp read");
-                    buf[ret] = '\0';
-                    fprintf(stderr, "%s\n", buf);
+                    buf[ret-1] = '\0';
+                    if (DEBUG) fprintf(stderr, "%s\n", buf);
 
                     // forward udp message
                     for (int j = 0; j < udpFwdList[i].fwdCount; j++)
@@ -568,7 +633,8 @@ void doServer(int fdT){
     {
         if (udpFwdList[i].fd < 0) continue;
         if (TEMP_FAILURE_RETRY(close(udpFwdList[i].fd)) < 0) ERR("close");
-        fprintf(stderr, "Closing udp listen socket. [%d left]\n", --udpCons);
+        udpCons--;
+        fprintf(stderr, "Closing udp listen socket. [%d left]\n", udpCons);
     }
 
     // close open tcp sockets
@@ -576,7 +642,8 @@ void doServer(int fdT){
     {
         if (tcpCon[i] < 0) continue;
         if (TEMP_FAILURE_RETRY(close(tcpCon[i])) < 0) ERR("close");
-        fprintf(stderr, "Closing tcp send socket. [%d left]\n", --tcpCons);
+        tcpCons--;
+        fprintf(stderr, "Closing tcp send socket. [%d left]\n", tcpCons);
     }
 
     sigprocmask (SIG_UNBLOCK, &mask, NULL);
