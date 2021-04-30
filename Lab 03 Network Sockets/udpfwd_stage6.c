@@ -156,9 +156,9 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
         return -1;
     }
 
-	if (strtol(token, NULL, 10) < 1025 || strtol(token, NULL, 10) > 65535)
+	if (strtol(token, NULL, 10) < 1024 || strtol(token, NULL, 10) > 65535)
 	{
-		fprintf(stderr, "Port number must be between 1025 and 65535.\n");
+		fprintf(stderr, "Port number must be between 1024 and 65535.\n");
         return -1;
 	}
 
@@ -212,9 +212,9 @@ int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_
                     return -1;
                 }
 
-				if (strtol(subtoken, NULL, 10) < 1025 || strtol(subtoken, NULL, 10) > 65535)
+				if (strtol(subtoken, NULL, 10) < 1024 || strtol(subtoken, NULL, 10) > 65535)
                 {
-                    fprintf(stderr, "Port number must be between 1025 and 65535.\n");
+                    fprintf(stderr, "Port number must be between 1024 and 65535.\n");
                     return -1;
                 }
 
@@ -311,14 +311,13 @@ int process_close(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* bas
     // get port number to close
     if ((token = strtok_r(NULL, " ", &saveptr1)) == NULL)
     {
-        fprintf(stderr, "close command parameters missing!\n");
+        fprintf(stderr, "Port number missing!\n");
         return -1;
     }
     
-    //check port number is ok
-    for (j = 0; j < strlen(token); j++)
+    //check port number is a number
+    if (isnumeric(token) < 0)
     {
-        if (isdigit(token[j])) continue;
         fprintf(stderr, "Error in udp listen port number!\n");
         return -1;
     }
@@ -328,6 +327,7 @@ int process_close(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* bas
     
     for (j = 0; j < MAX_UDPLISTEN; j++)
     {
+        // skip until finding the correct array position of the port
         if (udpFwdList[j].fd == -1 || strtol(udpListen, NULL, 10) != strtol(udpFwdList[j].port, NULL, 10)) continue;
         
         // remove udp from base_rdfs, close socket and set fd to -1
@@ -338,7 +338,7 @@ int process_close(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* bas
         return 0;
     }
 
-    fprintf(stderr, "Theres' no open udp socket with prot number %s\n", udpListen);
+    fprintf(stderr, "There's no open udp socket with port number %s\n", udpListen);
     return -1;
 }
 
@@ -365,6 +365,42 @@ int process_msg(char* msg, udpfwd_t* udpFwdList, fd_set* base_rfds){
         return 1;
     }
     else return -1;	
+}
+
+// reply to <show> command
+void sendFwdInfo(int fdT, udpfwd_t* udpFwdList)
+{
+    char buf[MAXBUF] = "";
+    int ruleNo = 0;
+                            
+    memset(buf, 0, sizeof(buf));
+    sprintf(buf, "\nActive forwarding rules are:\n");
+    if(bulk_write(fdT, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
+    
+    for (int j = 0; j < MAX_UDPLISTEN; j++)
+    {
+        if (udpFwdList[j].fd == -1) continue;
+
+        ruleNo++;
+        memset(buf, 0, sizeof(buf));
+        sprintf(buf, "[%02d] Port %-5s is forwarded to:\n", ruleNo, udpFwdList[j].port);
+        if(bulk_write(fdT, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
+
+        memset(buf, 0, sizeof(buf));
+        sprintf(buf, "%24s : %5s\n%24s   %5s\n", "IP Adress", "Port", "----------------", "-----");
+        if(bulk_write(fdT, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
+        
+        for (int k = 0; k < udpFwdList[j].fwdCount; k++)
+        {
+            memset(buf, 0, sizeof(buf));
+            sprintf(buf, "%24s : %5s\n", udpFwdList[j].fwdAddr[k], udpFwdList[j].fwdPort[k]);
+            if(bulk_write(fdT, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
+        }
+        
+        memset(buf, 0, sizeof(buf));
+        sprintf(buf, "\n");
+        if(bulk_write(fdT, buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
+    }
 }
 
 // pselect
@@ -458,37 +494,7 @@ void doServer(int fdT)
                         }
                         else if (ret == 1) // <show> message received
                         {
-                            int ruleNo = 0;
-                            
-                            memset(buf, 0, sizeof(buf));
-                            sprintf(buf, "\nActive forwarding rules are:\n");
-                            if(bulk_write(tcpCon[i], buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
-                            
-                            for (int j = 0; j < MAX_UDPLISTEN; j++)
-                            {
-                                if (udpFwdList[j].fd == -1) continue;
-
-                                ruleNo++;
-                                memset(buf, 0, sizeof(buf));
-                                sprintf(buf, "[%02d] Port %-5s is forwarded to:\n", ruleNo, udpFwdList[j].port);
-                                if(bulk_write(tcpCon[i], buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
-
-                                memset(buf, 0, sizeof(buf));
-                                sprintf(buf, "%24s : %5s\n%24s   %5s\n", "IP Adress", "Port", "----------------", "-----");
-                                if(bulk_write(tcpCon[i], buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
-                                
-                                for (int k = 0; k < udpFwdList[j].fwdCount; k++)
-                                {
-                                    memset(buf, 0, sizeof(buf));
-                                    sprintf(buf, "%24s : %5s\n", udpFwdList[j].fwdAddr[k], udpFwdList[j].fwdPort[k]);
-                                    if(bulk_write(tcpCon[i], buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
-                                }
-                                
-                                memset(buf, 0, sizeof(buf));
-                                sprintf(buf, "\n");
-                                if(bulk_write(tcpCon[i], buf, sizeof(buf)) < 0 && errno!=EPIPE) ERR("write:");
-                            }
-
+                            sendFwdInfo(tcpCon[i], udpFwdList);
                         }
                     }
                 }
