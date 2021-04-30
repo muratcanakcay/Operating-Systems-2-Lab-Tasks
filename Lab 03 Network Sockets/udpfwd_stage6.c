@@ -225,19 +225,19 @@ int validateIpPort(char* ipPort, char*fwdAddr, char* fwdPort)
         // check port format
         if (i == 1)
         {	
-            if (validatePort(token) < 0) return -1;
-
             strncpy(fwdPort, token, strlen(token));
             printf(" PORT --> %s\n", fwdPort);
+
+            if (validatePort(token) < 0) return -1;
         }
 
         //check ip format
         if (i == 0)
         {
-            if (validateIp(token) < 0) return -1;
-
             strncpy(fwdAddr, token, strlen(token));
             printf("IP   --> %s\n", fwdAddr);
+
+            if (validateIp(token) < 0) return -1;
         }
     }
 
@@ -249,7 +249,6 @@ int validateIpPort(char* ipPort, char*fwdAddr, char* fwdPort)
 
     return 0;
 }
-
 
 int process_fwd(char* token, char* saveptr1, udpfwd_t* udpFwdList, fd_set* base_rfds)
 {
