@@ -19,6 +19,7 @@
 
 #define BACKLOG 3
 #define MAXTHREADS 20
+#define MAXBUF 16
 #define HERE puts("***********************")
 volatile sig_atomic_t do_work=1 ;
 
@@ -129,10 +130,12 @@ void* playerThread(void* voidData)
 
 	fd_set base_rfds, rfds, wfds;
 	sigset_t mask, oldmask;
-    int playerNo = tArgs->playerNo;
+    int ret = 0;
+	int playerNo = tArgs->playerNo;
 	int fdT= tArgs->fdT;
 	int cfd= tArgs->cfd;
 	char data[50] = {0};
+	char buf[MAXBUF] = "";
 	
 	// set base_rfds once and use in the loop to reset rfds
 	FD_ZERO(&base_rfds);
@@ -153,34 +156,16 @@ void* playerThread(void* voidData)
 		
 		if(pselect(FD_SETSIZE, &rfds, &wfds, NULL, NULL, &oldmask) > 0)
         {
-			if (FD_ISSET(cfd, &wfds))
+			if (FD_ISSET(cfd, &rfds))
 			{
+				if ((ret = recv(cfd, buf, MAXBUF, 0)) < 0) ERR("recv"); 
+                buf[ret-2] = '\0'; // remove endline char
+				fprintf(stderr, "RECEIVED MESSAGE: \"%s\" with size %d\n", buf, ret);
 
 			}
 			
 			
-			// if((cfd=add_new_client(fdT))>=0)
-            // {
-			// 	snprintf(data, 50, "You are player#%d. Please wait...", playerNo);
-			// 	if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
-			// 	//if(TEMP_FAILURE_RETRY(close(cfd))<0)ERR("close");
-			// 	playerNo++;
-				
-			// 	if (playerNo == numPlayers + 1)
-			// 	{
-			// 		for(int i = 0; i<numPlayers; i++)
-			// 		{
-			// 			if (pthread_create(&tid, NULL, threadWork, &cfd)) ERR("pthread_create");
-			// 		}
-			// 	}
-
-
-			// }
-            // else
-            // {
-            //     if(EINTR==errno) continue;
-            //     ERR("pselect");
-            // }
+			
 
 
         }
