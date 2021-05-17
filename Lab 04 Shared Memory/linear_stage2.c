@@ -44,6 +44,17 @@ typedef struct gamedata_t
 } gamedata_t;
 
 
+int checkMsg(char* msg) // check if the message if valid
+{
+	if (strcmp(msg, "-21") == 0 ||
+		strcmp(msg, "-1") == 0 ||
+		strcmp(msg, "0") == 0 ||
+		strcmp(msg, "1") == 0 ||
+		strcmp(msg, "2") == 0)
+		return 0;
+	else return -1;
+}
+
 void sigint_handler(int sig) {
 	do_work=0;
 }
@@ -160,7 +171,8 @@ void* playerThread(void* voidData)
 			{
 				if ((ret = recv(cfd, buf, MAXBUF, 0)) < 0) ERR("recv"); 
                 buf[ret-2] = '\0'; // remove endline char
-				fprintf(stderr, "RECEIVED MESSAGE: \"%s\" with size %d\n", buf, ret);
+				if (checkMsg(buf) == 0)
+					fprintf(stderr, "RECEIVED MESSAGE: \"%s\" with size %d\n", buf, ret);
 
 			}
 			
@@ -171,10 +183,8 @@ void* playerThread(void* voidData)
         }
 	}
 	sigprocmask (SIG_UNBLOCK, &mask, NULL);
-
-
-
 }
+
 
 // pselect
 void doServer(int fdT, int numPlayers, int boardSize){
