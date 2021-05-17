@@ -28,11 +28,20 @@ void usage(char * name){
 
 typedef struct threadArgs
 {
-	pthread_t* tid;
+	pthread_t tid;
 	int playerNo;
 	int fdT;
 	int cfd;
 } threadArgs;
+
+typedef struct gamedata_t
+{
+	pthread_t* tid;
+	int playerNo;
+	int fdT;
+	int cfd;
+} gamedata_t;
+
 
 void sigint_handler(int sig) {
 	do_work=0;
@@ -176,13 +185,16 @@ void* threadWork(void* voidData)
 
 // pselect
 void doServer(int fdT, int numPlayers, int boardSize){
-	int cfd;
+	int cfd, cons = 0;
 	fd_set base_rfds, rfds ;
 	sigset_t mask, oldmask;
     int playerNo = 1;
 	char data[50] = {0};
 	int* arg;
-	threadArgs tArgs[MAXTHREADS];
+
+	threadArgs tArgs[MAXTHREADS]; //TODO: allocate dynamically?
+	memset(tArgs, 0, sizeof(threadArgs) * MAXTHREADS);
+
 	for(int i = 0; i<numPlayers; i++)
 		tArgs[i].fdT = fdT;
 	
@@ -199,15 +211,20 @@ void doServer(int fdT, int numPlayers, int boardSize){
     {
 		rfds=base_rfds;
 		
-		if(pselect(fdT+1,&rfds,NULL,NULL,NULL,&oldmask)>0)
+		if(pselect(FD_SETSIZE, &rfds, NULL, NULL, NULL, &oldmask) > 0)
         {
-			if((cfd=add_new_client(fdT))>=0)
+			
+			
+			//  new client connection
+			if((cfd = add_new_client(fdT)) >= 0)  // why >= ??
             {
 				snprintf(data, 50, "You are player#%d. Please wait...", playerNo);
 				if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
 				//if(TEMP_FAILURE_RETRY(close(cfd))<0)ERR("close");
 				tArgs[playerNo-1].cfd = cfd;
 				tArgs[playerNo-1].playerNo = playerNo;
+				cons++;
+				fprintf(stderr, "Added player %d with fd: %d Active connections: %d.\n", tArgs[playerNo-1].playerNo, tArgs[playerNo-1].cfd, cons);
 				playerNo++;
 
 				HERE;
@@ -217,7 +234,7 @@ void doServer(int fdT, int numPlayers, int boardSize){
 					for(int i = 0; i < numPlayers; i++)
 					{
 						printf("Creating worker thread no %d\n", i);
-						if (pthread_create(tArgs[i].tid, NULL, threadWork, (void*)&tArgs[i])) ERR("pthread_create");
+						if (pthread_create(&tArgs[i].tid, NULL, threadWork, &tArgs[i])) ERR("pthread_create");
 					}
 				}
 
