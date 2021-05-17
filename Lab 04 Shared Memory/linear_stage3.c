@@ -13,6 +13,9 @@
 #include <signal.h>
 #include <netdb.h>
 #include <fcntl.h>
+#include <time.h>
+#include <semaphore.h>
+#include <stdbool.h>
 #define ERR(source) (perror(source),\
 		fprintf(stderr,"%s:%d\n",__FILE__,__LINE__),\
 		exit(EXIT_FAILURE))
@@ -21,18 +24,28 @@
 #define MAXTHREADS 20
 #define MAXBUF 16
 #define HERE puts("***********************")
+
 volatile sig_atomic_t do_work=1 ;
 
 void usage(char * name){
 	fprintf(stderr,"USAGE: %s socket port\n",name);
 }
 
+typedef unsigned int UINT;
+
 typedef struct threadArgs
 {
 	pthread_t tid;
+	int boardSize;
 	int playerNo;
 	int fdT;
 	int cfd;
+	int* board;
+	int pos;
+	UINT seed;
+	sem_t* initSem;
+	sem_t* readSem;
+	sem_t* cellSems;
 } threadArgs;
 
 typedef struct gamedata_t
@@ -53,6 +66,21 @@ int checkMsg(char* msg) // check if the message from client is valid
 		strcmp(msg, "2") == 0)
 		return 0;
 	else return -1;
+}
+
+void printBoard(int* board, int boardSize)
+{
+	fprintf(stderr, "BOARD: ");
+	for (int i = 0; i < boardSize - 1; i++) 
+	{
+		if (board[i] > 0) fprintf(stderr, "%d", board[i]);
+		else fprintf(stderr, " ");
+		fprintf(stderr, " | ");
+	}
+	if (board[boardSize - 1] > 0) fprintf(stderr, "%d", board[boardSize - 1]);
+	else fprintf(stderr, " ");
+	
+	fprintf(stderr, "\n");
 }
 
 void sigint_handler(int sig) {
@@ -145,6 +173,11 @@ void* playerThread(void* voidData)
 	int playerNo = tArgs->playerNo;
 	int fdT= tArgs->fdT;
 	int cfd= tArgs->cfd;
+	int pos = tArgs->pos;
+	UINT seed = tArgs->seed;
+	int boardSize = tArgs->boardSize;
+	int* board = tArgs->board;
+	sem_t* initSem = tArgs->initSem;
 	char data[50] = {0};
 	char buf[MAXBUF] = "";
 	
@@ -159,6 +192,39 @@ void* playerThread(void* voidData)
 	
 	snprintf(data, 50, "The game has started.\n");
 	if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
+
+	bool placed = false;
+	while(!placed)
+	{
+		if (TEMP_FAILURE_RETRY(sem_trywait(initSem)) == -1) 
+		{
+			if(errno == EAGAIN || errno == EINTR) continue;
+			else ERR("sem_wait");
+		}
+
+		fprintf(stderr, "initSem locked by Player %d\n", playerNo);
+
+		while (pos == -1)
+		{
+			int tryPos = rand_r(&seed) % boardSize;
+
+			fprintf(stderr, "trying to place player %d at position %d\n", playerNo, tryPos);
+
+			if(board[tryPos] == 0) 
+			{
+				board[tryPos] = playerNo;
+				pos = tryPos;
+				fprintf(stderr, "player %d placed at position %d\n", playerNo, tryPos);
+				placed = true;
+			}
+			else fprintf(stderr, "cannot place player %d at position %d which is occupped by player %d\n", playerNo, tryPos, board[tryPos]); 
+		}
+	}
+
+	if (sem_post(initSem) == -1) ERR("sem_post");
+
+	printBoard(board, boardSize);
+	fprintf(stderr, "initSem unlocked by Player %d\n", playerNo);
 
 	while(do_work)
     {
@@ -188,12 +254,25 @@ void doServer(int fdT, int numPlayers, int boardSize){
     int playerNo = 1;
 	char data[50] = {0};
 	int* arg;
+	sem_t initSem;
+	sem_t readSem;
 
 	threadArgs tArgs[MAXTHREADS]; //TODO: allocate dynamically?
 	memset(tArgs, 0, sizeof(threadArgs) * MAXTHREADS);
 
+	int* board = (int*)calloc(boardSize, sizeof(int));
+
+	if (sem_init(&initSem, 0, 1) != 0) ERR("sem_init");
+
 	for(int i = 0; i<numPlayers; i++)
+	{
 		tArgs[i].fdT = fdT;
+		tArgs[i].board = board;
+		tArgs[i].seed = rand();
+		tArgs[i].pos = -1;
+		tArgs[i].initSem = &initSem;
+		tArgs[i].boardSize = boardSize;
+	}
 	
 	// set base_rfds once and use in the loop to reset rfds
 	FD_ZERO(&base_rfds);
@@ -247,6 +326,8 @@ void doServer(int fdT, int numPlayers, int boardSize){
 
 int main(int argc, char** argv) 
 {
+	srand(time(NULL));
+	
 	int fdT;
 	int new_flags;
 
