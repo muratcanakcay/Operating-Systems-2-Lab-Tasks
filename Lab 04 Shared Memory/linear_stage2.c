@@ -44,7 +44,7 @@ typedef struct gamedata_t
 } gamedata_t;
 
 
-int checkMsg(char* msg) // check if the message if valid
+int checkMsg(char* msg) // check if the message from client is valid
 {
 	if (strcmp(msg, "-21") == 0 ||
 		strcmp(msg, "-1") == 0 ||
@@ -173,13 +173,7 @@ void* playerThread(void* voidData)
                 buf[ret-2] = '\0'; // remove endline char
 				if (checkMsg(buf) == 0)
 					fprintf(stderr, "RECEIVED MESSAGE: \"%s\" with size %d\n", buf, ret);
-
 			}
-			
-			
-			
-
-
         }
 	}
 	sigprocmask (SIG_UNBLOCK, &mask, NULL);
