@@ -121,7 +121,7 @@ ssize_t bulk_write(int fd, char *buf, size_t count){
     return len ;
 }
 
-void* threadWork(void* voidData)
+void* playerThread(void* voidData)
 {
 	threadArgs* tArgs = (threadArgs*)voidData;
 	
@@ -129,21 +129,21 @@ void* threadWork(void* voidData)
 
 	fd_set base_rfds, rfds, wfds;
 	sigset_t mask, oldmask;
-    int playerNo = 1;
+    int playerNo = tArgs->playerNo;
 	int fdT= tArgs->fdT;
 	int cfd= tArgs->cfd;
 	char data[50] = {0};
 	
 	// set base_rfds once and use in the loop to reset rfds
 	FD_ZERO(&base_rfds);
-	FD_SET(fdT, &base_rfds);
+	FD_SET(cfd, &base_rfds);
 	
 	// set signal mask for pselect
 	sigemptyset (&mask);
 	sigaddset (&mask, SIGINT);
 	sigprocmask (SIG_BLOCK, &mask, &oldmask);
 	
-	snprintf(data, 50, "You are player#%d. Please wait...", playerNo);
+	snprintf(data, 50, "The game has started.\n");
 	if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
 
 	while(do_work)
@@ -151,8 +151,14 @@ void* threadWork(void* voidData)
 		rfds=base_rfds;
 		wfds=base_rfds;
 		
-		if(pselect(fdT+1,&rfds,NULL,NULL,NULL,&oldmask)>0)
+		if(pselect(FD_SETSIZE, &rfds, &wfds, NULL, NULL, &oldmask) > 0)
         {
+			if (FD_ISSET(cfd, &wfds))
+			{
+
+			}
+			
+			
 			// if((cfd=add_new_client(fdT))>=0)
             // {
 			// 	snprintf(data, 50, "You are player#%d. Please wait...", playerNo);
@@ -175,6 +181,8 @@ void* threadWork(void* voidData)
             //     if(EINTR==errno) continue;
             //     ERR("pselect");
             // }
+
+
         }
 	}
 	sigprocmask (SIG_UNBLOCK, &mask, NULL);
@@ -213,32 +221,30 @@ void doServer(int fdT, int numPlayers, int boardSize){
 		
 		if(pselect(FD_SETSIZE, &rfds, NULL, NULL, NULL, &oldmask) > 0)
         {
-			
-			
 			//  new client connection
 			if((cfd = add_new_client(fdT)) >= 0)  // why >= ??
             {
-				snprintf(data, 50, "You are player#%d. Please wait...", playerNo);
+				snprintf(data, 50, "You are player#%d. Please wait...\n", playerNo);
 				if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
 				//if(TEMP_FAILURE_RETRY(close(cfd))<0)ERR("close");
 				tArgs[playerNo-1].cfd = cfd;
 				tArgs[playerNo-1].playerNo = playerNo;
 				cons++;
 				fprintf(stderr, "Added player %d with fd: %d Active connections: %d.\n", tArgs[playerNo-1].playerNo, tArgs[playerNo-1].cfd, cons);
-				playerNo++;
+				
 
 				HERE;
 				
-				if (playerNo == numPlayers + 1)
+				if (playerNo == numPlayers)
 				{
 					for(int i = 0; i < numPlayers; i++)
 					{
-						printf("Creating worker thread no %d\n", i);
-						if (pthread_create(&tArgs[i].tid, NULL, threadWork, &tArgs[i])) ERR("pthread_create");
+						printf("Creating player thread no %d\n", i);
+						if (pthread_create(&tArgs[i].tid, NULL, playerThread, &tArgs[i])) ERR("pthread_create");
 					}
 				}
 
-
+				playerNo++;
 			}
             else
             {
