@@ -56,6 +56,20 @@ typedef struct gamedata_t
 	int cfd;
 } gamedata_t;
 
+typedef struct timespec timespec_t;
+
+//declaration
+ssize_t bulk_write(int fd, char *buf, size_t count);
+
+void msleep(UINT milisec) 
+{
+    time_t sec= (int)(milisec/1000);
+    milisec = milisec - (sec*1000);
+    timespec_t req= {0};
+    req.tv_sec = sec;
+    req.tv_nsec = milisec * 1000000L;
+    if(nanosleep(&req,&req)) ERR("nanosleep");
+}
 
 int checkMsg(char* msg) // check if the message from client is valid
 {
@@ -81,6 +95,26 @@ void printBoard(int* board, int boardSize)
 	else fprintf(stderr, " ");
 	
 	fprintf(stderr, "\n");
+}
+
+void sendBoard(int* board, int boardSize, int cfd)
+{
+	char data[50] = "";
+	
+	snprintf(data, 50, "|");
+	for (int i = 0; i < boardSize - 1; i++) 
+	{
+		if (board[i] > 0) snprintf(data+(2*i)+1, 50-(2*i)-1, "%d", board[i]);
+		else snprintf(data+(2*i)+1, 50-(2*i)-1, " ");
+		snprintf(data+(2*i)+2, 50-(2*i)-2, "|");
+	}
+	if (board[boardSize - 1] > 0) snprintf(data+(2*(boardSize-1))+1, 50-(2*(boardSize-1))-1, "%d", board[boardSize-1]);
+	else snprintf(data+(2*(boardSize-1))+1, 50-(2*(boardSize-1))-1, " ");
+
+	snprintf(data+(2*(boardSize-1))+2, 50-(2*(boardSize-1))-2, "|");
+	
+	if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
+	
 }
 
 void sigint_handler(int sig) {
@@ -204,7 +238,7 @@ void* playerThread(void* voidData)
 
 		fprintf(stderr, "initSem locked by Player %d\n", playerNo);
 
-		while (pos == -1)
+		while (pos == -1) 
 		{
 			int tryPos = rand_r(&seed) % boardSize;
 
@@ -221,10 +255,13 @@ void* playerThread(void* voidData)
 		}
 	}
 
+	fprintf(stderr, "initSem unlocked by Player %d\n", playerNo);
 	if (sem_post(initSem) == -1) ERR("sem_post");
 
-	printBoard(board, boardSize);
-	fprintf(stderr, "initSem unlocked by Player %d\n", playerNo);
+	//printBoard(board, boardSize);
+	
+	msleep(100);
+	sendBoard(board, boardSize, cfd);
 
 	while(do_work)
     {
