@@ -188,26 +188,44 @@ int sendBoard(gamedata_t* gameData)
 	return 0;
 }
 
-int makeMove(int move, gamedata_t* gameData)
+void outOfBoard(int playerNo, gamedata_t* gameData)
+{
+	char data[] = "You lost: You stepped out of the board!\n";
+	int cfd = gameData->cfds[playerNo - 1];
+	gameData->board[playerNo -1] = 0;
+
+	if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
+	if(TEMP_FAILURE_RETRY(close(cfd))<0)ERR("close");
+	
+}
+
+int makeMove(int move, int playerNo, gamedata_t* gameData)
 {
 	int boardSize = gameData->boardSize;
 	int* board = gameData->board;
-	int cfd = gameData->cfds[getPlayerNo(gameData) - 1];
+	int cfd = gameData->cfds[playerNo - 1];
 
-	fprintf(stderr, "player %d making move: %d\n", getPlayerNo(gameData), move);
+	fprintf(stderr, "player %d making move: %d\n", playerNo, move);
+
+	int newPos = gameData->players[playerNo - 1].pos + move;
+	if(newPos < 0 || newPos > boardSize -1) 
+	{
+		fprintf(stderr, "player %d moved to: %d whic is invalid\n", playerNo, newPos);
+		outOfBoard(playerNo, gameData);
+	}
 
 	return 0;
 }
 
 
-int processMsg(char* msg, gamedata_t* gameData) // check if the message from client is valid
+int processMsg(char* msg, int playerNo, gamedata_t* gameData) // check if the message from client is valid
 {
 	if (strcmp(msg, "0") == 0) return sendBoard(gameData);
 	else if (strcmp(msg, "-2") == 0 ||
 			strcmp(msg, "-1") == 0 ||		
 			strcmp(msg, "1") == 0 ||
 			strcmp(msg, "2") == 0)
-		return makeMove(atoi(msg), gameData);
+		return makeMove(atoi(msg), playerNo, gameData);
 	else return -1;
 }
 
@@ -263,6 +281,8 @@ void* playerThread(void* voidData)
 			{
 				board[tryPos] = playerNo;
 				pos = tryPos;
+				gameData->players[playerNo - 1].pos = pos;
+
 				fprintf(stderr, "player %d placed at position %d\n", playerNo, tryPos);
 				placed = true;
 			}
@@ -289,7 +309,7 @@ void* playerThread(void* voidData)
 			{
 				if ((ret = recv(cfd, buf, MAXBUF, 0)) < 0) ERR("recv"); 
                 buf[ret-2] = '\0'; // remove endline char
-				if (processMsg(buf, gameData) == 0)
+				if (processMsg(buf, playerNo, gameData) == 0)
 				{
 					fprintf(stderr, "RECEIVED MESSAGE: \"%s\" with size %d\n", buf, ret);
 					//processMsg(buf, gameData, playerNo)
