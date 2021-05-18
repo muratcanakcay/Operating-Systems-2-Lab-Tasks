@@ -68,10 +68,6 @@ void msleep(UINT milisec)
     if(nanosleep(&req,&req)) ERR("nanosleep");
 }
 
-
-
-
-
 void sigint_handler(int sig) {
 	do_work=0;
 }
@@ -170,7 +166,6 @@ int sendBoard(gamedata_t* gameData)
 	
 	// PUT READ SEMAPHORE HERE!!!!
 
-
 	snprintf(data, 50, "|");
 	for (int i = 0; i < boardSize - 1; i++) 
 	{
@@ -199,28 +194,62 @@ void outOfBoard(int playerNo, gamedata_t* gameData)
 	
 }
 
+void steppedOn(int playerNo, int deadPlayerCfd)
+{
+	char data[50] = "";
+	snprintf(data, 50, "PLAYER#%d stepped on you!\n", playerNo);
+	if(bulk_write(deadPlayerCfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
+	if(TEMP_FAILURE_RETRY(close(deadPlayerCfd))<0)ERR("close");
+}
+
 int makeMove(int move, int playerNo, gamedata_t* gameData)
 {
 	int boardSize = gameData->boardSize;
 	int* board = gameData->board;
 	int cfd = gameData->cfds[playerNo - 1];
+	int oldPos = gameData->players[playerNo - 1].pos;
 
 	fprintf(stderr, "player %d making move: %d\n", playerNo, move);
 
-	int newPos = gameData->players[playerNo - 1].pos + move;
+	int newPos = oldPos + move;
 	if(newPos < 0 || newPos > boardSize -1) 
 	{
-		fprintf(stderr, "player %d moved to: %d whic is invalid\n", playerNo, newPos);
+		fprintf(stderr, "player %d moved to: %d which is out of bounds\n", playerNo, newPos);
 		outOfBoard(playerNo, gameData);
 	}
+	else 
+	{
+		// move out of old position
+		if (TEMP_FAILURE_RETRY(sem_wait(&gameData->cellSems[oldPos])) == -1) 
+		{
+			if(errno == EINTR); // HANDLE SIGINT!;
+			else ERR("sem_wait");
+		}
+		fprintf(stderr, "Sem %d locked by Player %d for leaving\n", oldPos, playerNo);
 
-	gameData->board[gameData->players[playerNo - 1].pos] = 0;
-	gameData->players[playerNo - 1].pos = newPos;
-	gameData->board[newPos] = playerNo;
+		gameData->board[gameData->players[playerNo - 1].pos] = 0;
+		
+		if (sem_post(&gameData->cellSems[oldPos]) == -1) ERR("sem_post");
+		fprintf(stderr, "Sem %d unlocked by Player %d after leaving\n", oldPos, playerNo);
+		
+		// move into new position
+		if (TEMP_FAILURE_RETRY(sem_wait(&gameData->cellSems[newPos])) == -1) 
+		{
+			if(errno == EINTR); // HANDLE SIGINT!;
+			else ERR("sem_wait");
+		}
+		fprintf(stderr, "Sem %d locked by Player %d for entering\n", newPos, playerNo);
+		
+		if(gameData->board[newPos] != 0) steppedOn(playerNo, gameData->cfds[gameData->board[newPos] - 1]);
+		gameData->board[newPos] = playerNo;
+		gameData->players[playerNo - 1].pos = newPos;
+
+		if (sem_post(&gameData->cellSems[newPos]) == -1) ERR("sem_post");
+		fprintf(stderr, "Sem %d unlocked by Player %d after entering\n", newPos, playerNo);
+	}
 
 	return 0;
 }
-
 
 int processMsg(char* msg, int playerNo, gamedata_t* gameData) // check if the message from client is valid
 {

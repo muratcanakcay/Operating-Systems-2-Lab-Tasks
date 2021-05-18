@@ -1,12 +1,12 @@
 CC=gcc
 CFLAGS= -std=gnu99 -Wall -lpthread -lm -lrt
 
-all: linear_stage4
+all: linear_stage5
 
-linear_stage4: linear_stage4.c
-	${CC} ${CFLAGS} -o linear_stage4 linear_stage4.c
+linear_stage5: linear_stage5.c
+	${CC} ${CFLAGS} -o linear_stage5 linear_stage5.c
 
 .PHONY: clean all
 clean:
-	rm linear_stage4 
+	rm linear_stage5 
 	
