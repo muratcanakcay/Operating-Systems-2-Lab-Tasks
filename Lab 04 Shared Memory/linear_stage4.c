@@ -267,7 +267,7 @@ void* playerThread(void* voidData)
 				if ((ret = recv(cfd, buf, MAXBUF, 0)) < 0) ERR("recv"); 
                 buf[ret-2] = '\0'; // remove endline char
 				if (checkMsg(buf) == 0)
-					fprintf(stderr, "RECEIVED MESSAGE: \"%s\" with size %d\n", buf, ret);
+					fprintf(stderr, "RECEIVED MESSAGE: \"%s\" from player %d\n", buf, playerNo);
 			}
         }
 	}
@@ -287,7 +287,6 @@ void doServer(gamedata_t* gameData){
 	sigset_t mask, oldmask;
     int playerNo = 1;
 	char data[50] = {0};
-
 	
 	// set base_rfds once and use in the loop to reset rfds
 	FD_ZERO(&base_rfds);
@@ -311,13 +310,9 @@ void doServer(gamedata_t* gameData){
 				if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
 				//if(TEMP_FAILURE_RETRY(close(cfd))<0)ERR("close");
 				gameData->cfds[playerNo - 1] = cfd;
-				
-				// tArgs[playerNo-1].cfd = cfd;
-				// tArgs[playerNo-1].playerNo = playerNo;
 				cons++;
 				fprintf(stderr, "Added player %d with fd: %d Active connections: %d.\n", playerNo, gameData->cfds[playerNo-1], cons);
 				
-
 				HERE;
 				
 				if (playerNo == gameData->numPlayers)
