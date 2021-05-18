@@ -68,36 +68,9 @@ void msleep(UINT milisec)
     if(nanosleep(&req,&req)) ERR("nanosleep");
 }
 
-int checkMsg(char* msg) // check if the message from client is valid
-{
-	if (strcmp(msg, "-21") == 0 ||
-		strcmp(msg, "-1") == 0 ||
-		strcmp(msg, "0") == 0 ||
-		strcmp(msg, "1") == 0 ||
-		strcmp(msg, "2") == 0)
-		return 0;
-	else return -1;
-}
 
-void sendBoard(int* board, int boardSize, int cfd)
-{
-	char data[50] = "";
-	
-	snprintf(data, 50, "|");
-	for (int i = 0; i < boardSize - 1; i++) 
-	{
-		if (board[i] > 0) snprintf(data+(2*i)+1, 50-(2*i)-1, "%d", board[i]);
-		else snprintf(data+(2*i)+1, 50-(2*i)-1, " ");
-		snprintf(data+(2*i)+2, 50-(2*i)-2, "|");
-	}
-	if (board[boardSize - 1] > 0) snprintf(data+(2*(boardSize-1))+1, 50-(2*(boardSize-1))-1, "%d", board[boardSize-1]);
-	else snprintf(data+(2*(boardSize-1))+1, 50-(2*(boardSize-1))-1, " ");
 
-	snprintf(data+(2*(boardSize-1))+2, 50-(2*(boardSize-1))-2, "|\n");
-	
-	if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
-	
-}
+
 
 void sigint_handler(int sig) {
 	do_work=0;
@@ -188,6 +161,56 @@ int getPlayerNo(gamedata_t* gameData)
     return -1;
 }
 
+int sendBoard(gamedata_t* gameData)
+{
+	char data[50] = "";
+	int boardSize = gameData->boardSize;
+	int* board = gameData->board;
+	int cfd = gameData->cfds[getPlayerNo(gameData) - 1];
+	
+	// PUT READ SEMAPHORE HERE!!!!
+
+
+	snprintf(data, 50, "|");
+	for (int i = 0; i < boardSize - 1; i++) 
+	{
+		if (board[i] > 0) snprintf(data+(2*i)+1, 50-(2*i)-1, "%d", board[i]);
+		else snprintf(data+(2*i)+1, 50-(2*i)-1, " ");
+		snprintf(data+(2*i)+2, 50-(2*i)-2, "|");
+	}
+	if (board[boardSize - 1] > 0) snprintf(data+(2*(boardSize-1))+1, 50-(2*(boardSize-1))-1, "%d", board[boardSize-1]);
+	else snprintf(data+(2*(boardSize-1))+1, 50-(2*(boardSize-1))-1, " ");
+
+	snprintf(data+(2*(boardSize-1))+2, 50-(2*(boardSize-1))-2, "|\n");
+	
+	if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
+
+	return 0;
+}
+
+int makeMove(int move, gamedata_t* gameData)
+{
+	int boardSize = gameData->boardSize;
+	int* board = gameData->board;
+	int cfd = gameData->cfds[getPlayerNo(gameData) - 1];
+
+	fprintf(stderr, "player %d making move: %d\n", getPlayerNo(gameData), move);
+
+	return 0;
+}
+
+
+int processMsg(char* msg, gamedata_t* gameData) // check if the message from client is valid
+{
+	if (strcmp(msg, "0") == 0) return sendBoard(gameData);
+	else if (strcmp(msg, "-2") == 0 ||
+			strcmp(msg, "-1") == 0 ||		
+			strcmp(msg, "1") == 0 ||
+			strcmp(msg, "2") == 0)
+		return makeMove(atoi(msg), gameData);
+	else return -1;
+}
+
 void* playerThread(void* voidData)
 {
 	gamedata_t* gameData = (gamedata_t*)voidData;
@@ -253,7 +276,7 @@ void* playerThread(void* voidData)
 	//printBoard(board, boardSize);
 	
 	msleep(100);
-	sendBoard(board, boardSize, cfd);
+	sendBoard(gameData);
 
 	while(do_work)
     {
@@ -266,8 +289,11 @@ void* playerThread(void* voidData)
 			{
 				if ((ret = recv(cfd, buf, MAXBUF, 0)) < 0) ERR("recv"); 
                 buf[ret-2] = '\0'; // remove endline char
-				if (checkMsg(buf) == 0)
-					fprintf(stderr, "RECEIVED MESSAGE: \"%s\" from player %d\n", buf, playerNo);
+				if (processMsg(buf, gameData) == 0)
+				{
+					fprintf(stderr, "RECEIVED MESSAGE: \"%s\" with size %d\n", buf, ret);
+					//processMsg(buf, gameData, playerNo)
+				}
 			}
         }
 	}
@@ -287,6 +313,7 @@ void doServer(gamedata_t* gameData){
 	sigset_t mask, oldmask;
     int playerNo = 1;
 	char data[50] = {0};
+
 	
 	// set base_rfds once and use in the loop to reset rfds
 	FD_ZERO(&base_rfds);
