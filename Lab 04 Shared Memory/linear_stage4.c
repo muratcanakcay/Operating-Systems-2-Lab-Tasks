@@ -33,27 +33,24 @@ void usage(char * name){
 
 typedef unsigned int UINT;
 
-typedef struct threadArgs
+typedef struct player_t
 {
 	pthread_t tid;
-	int boardSize;
-	int playerNo;
-	int fdT;
-	int cfd;
-	int* board;
 	int pos;
 	UINT seed;
-	sem_t* initSem;
-	sem_t* readSem;
-	sem_t* cellSems;
-} threadArgs;
+} player_t;
 
 typedef struct gamedata_t
 {
-	pthread_t* tid;
-	int playerNo;
+	int boardSize;
+	int numPlayers;
 	int fdT;
-	int cfd;
+	int* board;
+	int* cfds;
+	player_t* players;
+	sem_t* initSem;
+	sem_t* readSem;
+	sem_t* cellSems;
 } gamedata_t;
 
 typedef struct timespec timespec_t;
@@ -195,23 +192,33 @@ ssize_t bulk_write(int fd, char *buf, size_t count){
     return len ;
 }
 
+int getPlayerNo(gamedata_t* gameData)
+{    
+    pthread_t tid = pthread_self();
+
+    for (int playerNo = 0; playerNo < gameData->numPlayers; playerNo++)
+        if (pthread_equal(tid, gameData->players[playerNo].tid))
+            return playerNo+1;
+    
+    return -1;
+}
+
 void* playerThread(void* voidData)
 {
-	threadArgs* tArgs = (threadArgs*)voidData;
+	gamedata_t* gameData = (gamedata_t*)voidData;
 	
 	HERE;
 
 	fd_set base_rfds, rfds, wfds;
 	sigset_t mask, oldmask;
     int ret = 0;
-	int playerNo = tArgs->playerNo;
-	int fdT= tArgs->fdT;
-	int cfd= tArgs->cfd;
-	int pos = tArgs->pos;
-	UINT seed = tArgs->seed;
-	int boardSize = tArgs->boardSize;
-	int* board = tArgs->board;
-	sem_t* initSem = tArgs->initSem;
+	int playerNo = getPlayerNo(gameData);
+	int cfd= gameData->cfds[playerNo];
+	int pos = gameData->players[playerNo].pos;
+	UINT seed = gameData->players[playerNo].seed;
+	int boardSize = gameData->boardSize;
+	int* board = gameData->board;
+	sem_t* initSem = gameData->initSem;
 	char data[50] = {0};
 	char buf[MAXBUF] = "";
 	
@@ -284,32 +291,17 @@ void* playerThread(void* voidData)
 
 
 // pselect
-void doServer(int fdT, int numPlayers, int boardSize){
+void doServer(gamedata_t* gameData){
 	int cfd, cons = 0;
+	
+	int fdT = gameData->fdT;
+	
 	fd_set base_rfds, rfds ;
 	sigset_t mask, oldmask;
     int playerNo = 1;
 	char data[50] = {0};
 	int* arg;
-	sem_t initSem;
-	sem_t readSem;
 
-	threadArgs tArgs[MAXTHREADS]; //TODO: allocate dynamically?
-	memset(tArgs, 0, sizeof(threadArgs) * MAXTHREADS);
-
-	int* board = (int*)calloc(boardSize, sizeof(int));
-
-	if (sem_init(&initSem, 0, 1) != 0) ERR("sem_init");
-
-	for(int i = 0; i<numPlayers; i++)
-	{
-		tArgs[i].fdT = fdT;
-		tArgs[i].board = board;
-		tArgs[i].seed = rand();
-		tArgs[i].pos = -1;
-		tArgs[i].initSem = &initSem;
-		tArgs[i].boardSize = boardSize;
-	}
 	
 	// set base_rfds once and use in the loop to reset rfds
 	FD_ZERO(&base_rfds);
@@ -332,20 +324,22 @@ void doServer(int fdT, int numPlayers, int boardSize){
 				snprintf(data, 50, "You are player#%d. Please wait...\n", playerNo);
 				if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
 				//if(TEMP_FAILURE_RETRY(close(cfd))<0)ERR("close");
-				tArgs[playerNo-1].cfd = cfd;
-				tArgs[playerNo-1].playerNo = playerNo;
+				gameData->cfds[playerNo - 1] = cfd;
+				
+				// tArgs[playerNo-1].cfd = cfd;
+				// tArgs[playerNo-1].playerNo = playerNo;
 				cons++;
-				fprintf(stderr, "Added player %d with fd: %d Active connections: %d.\n", tArgs[playerNo-1].playerNo, tArgs[playerNo-1].cfd, cons);
+				fprintf(stderr, "Added player %d with fd: %d Active connections: %d.\n", playerNo, gameData->cfds[playerNo-1], cons);
 				
 
 				HERE;
 				
-				if (playerNo == numPlayers)
+				if (playerNo == gameData->numPlayers)
 				{
-					for(int i = 0; i < numPlayers; i++)
+					for(int i = 0; i < gameData->numPlayers; i++)
 					{
 						printf("Creating player thread no %d\n", i);
-						if (pthread_create(&tArgs[i].tid, NULL, playerThread, &tArgs[i])) ERR("pthread_create");
+						if (pthread_create(&gameData->players[i].tid, NULL, playerThread, gameData)) ERR("pthread_create");
 					}
 				}
 
@@ -364,6 +358,7 @@ void doServer(int fdT, int numPlayers, int boardSize){
 int main(int argc, char** argv) 
 {
 	srand(time(NULL));
+	struct gamedata_t gameData;
 	
 	int fdT;
 	int new_flags;
@@ -373,22 +368,70 @@ int main(int argc, char** argv)
 		usage(argv[0]);
 		return EXIT_FAILURE;
     }
-	
 
+	int portNo = atoi(argv[1]);
+	int numPlayers = atoi(argv[2]);
+	int boardSize = atoi(argv[3]);
+
+	if (numPlayers < 2 || numPlayers> 5 || boardSize < numPlayers || board > numPlayers * 5)
+	{
+		usage(argv[0]);
+		return EXIT_FAILURE;
+    }
+	
 	if(sethandler(SIG_IGN,SIGPIPE)) ERR("Seting SIGPIPE:");
 	if(sethandler(sigint_handler,SIGINT)) ERR("Seting SIGINT:");
 	
 	// make and bind both local and tcp sockets
-	fdT=bind_tcp_socket(atoi(argv[1]));
+	fdT = bind_tcp_socket(portNo);
 	
 	// set both local and tcp sockets to nonblocking
 	new_flags = fcntl(fdT, F_GETFL) | O_NONBLOCK;
 	fcntl(fdT, F_SETFL, new_flags);
 	
-	// accept connections and read data
-	doServer(fdT, atoi(argv[2]), atoi(argv[3]));
+	gameData.numPlayers = numPlayers;
+	gameData.boardSize = boardSize;
+	gameData.fdT = fdT;
+
+	// init
 	
-	if(TEMP_FAILURE_RETRY(close(fdT))<0)ERR("close");
+	player_t* players;
+	if ( (players = (player_t*) calloc(gameData.numPlayers, sizeof(player_t))) == NULL ) ERR("players malloc)");
+	
+	int* board;
+	if ( (board = (int*) calloc(gameData.boardSize, sizeof(int))) == NULL ) ERR("board malloc)");
+
+	int* cfds;
+	if ( (cfds = (int*) malloc(gameData.numPlayers * sizeof(int))) == NULL ) ERR("board malloc)");
+	for (int i = 0; i < gameData.numPlayers; i++) cfds[i] = -1;
+
+	sem_t* cellSems;
+	if ( (cellSems = (sem_t*) malloc(gameData.boardSize * sizeof(sem_t))) == NULL ) ERR("board malloc)");
+	for (int i = 0; i < gameData.boardSize; i++) if (sem_init(&cellSems[i], 0, 1) != 0) ERR("sem_init");;
+	
+	sem_t initSem;
+	if (sem_init(&initSem, 0, 1) != 0) ERR("sem_init");
+	
+	sem_t readSem;
+	if (sem_init(&readSem, 0, 1) != 0) ERR("sem_init");
+
+	gameData.board = board;
+	gameData.initSem = &initSem;
+	gameData.readSem = &readSem;
+	gameData.cellSems = cellSems;
+	gameData.players = players;
+	gameData.cfds = cfds;
+	
+	for(int i = 0; i < gameData.numPlayers; i++)
+	{
+		gameData.players[i].seed = rand();
+		gameData.players[i].pos = -1;
+	}
+	
+	// accept connections and read data
+	doServer(&gameData);
+	
+	if (TEMP_FAILURE_RETRY(close(fdT))<0) ERR("close");
 	fprintf(stderr,"Server has terminated.\n");
 	return EXIT_SUCCESS;
 }
