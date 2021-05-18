@@ -79,21 +79,6 @@ int checkMsg(char* msg) // check if the message from client is valid
 	else return -1;
 }
 
-void printBoard(int* board, int boardSize)
-{
-	fprintf(stderr, "BOARD: ");
-	for (int i = 0; i < boardSize - 1; i++) 
-	{
-		if (board[i] > 0) fprintf(stderr, "%d", board[i]);
-		else fprintf(stderr, " ");
-		fprintf(stderr, " | ");
-	}
-	if (board[boardSize - 1] > 0) fprintf(stderr, "%d", board[boardSize - 1]);
-	else fprintf(stderr, " ");
-	
-	fprintf(stderr, "\n");
-}
-
 void sendBoard(int* board, int boardSize, int cfd)
 {
 	char data[50] = "";
@@ -108,7 +93,7 @@ void sendBoard(int* board, int boardSize, int cfd)
 	if (board[boardSize - 1] > 0) snprintf(data+(2*(boardSize-1))+1, 50-(2*(boardSize-1))-1, "%d", board[boardSize-1]);
 	else snprintf(data+(2*(boardSize-1))+1, 50-(2*(boardSize-1))-1, " ");
 
-	snprintf(data+(2*(boardSize-1))+2, 50-(2*(boardSize-1))-2, "|");
+	snprintf(data+(2*(boardSize-1))+2, 50-(2*(boardSize-1))-2, "|\n");
 	
 	if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
 	
@@ -198,7 +183,7 @@ int getPlayerNo(gamedata_t* gameData)
 
     for (int playerNo = 0; playerNo < gameData->numPlayers; playerNo++)
         if (pthread_equal(tid, gameData->players[playerNo].tid))
-            return playerNo+1;
+            return playerNo + 1;
     
     return -1;
 }
@@ -213,9 +198,9 @@ void* playerThread(void* voidData)
 	sigset_t mask, oldmask;
     int ret = 0;
 	int playerNo = getPlayerNo(gameData);
-	int cfd= gameData->cfds[playerNo];
-	int pos = gameData->players[playerNo].pos;
-	UINT seed = gameData->players[playerNo].seed;
+	int cfd= gameData->cfds[playerNo - 1];
+	int pos = gameData->players[playerNo - 1].pos;
+	UINT seed = gameData->players[playerNo - 1].seed;
 	int boardSize = gameData->boardSize;
 	int* board = gameData->board;
 	sem_t* initSem = gameData->initSem;
@@ -231,7 +216,7 @@ void* playerThread(void* voidData)
 	sigaddset (&mask, SIGINT);
 	sigprocmask (SIG_BLOCK, &mask, &oldmask);
 	
-	snprintf(data, 50, "The game has started.\n");
+	snprintf(data, 50, "The game has started player %d\n", playerNo);
 	if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
 
 	bool placed = false;
@@ -287,6 +272,8 @@ void* playerThread(void* voidData)
         }
 	}
 	sigprocmask (SIG_UNBLOCK, &mask, NULL);
+
+	return NULL;
 }
 
 
@@ -300,7 +287,6 @@ void doServer(gamedata_t* gameData){
 	sigset_t mask, oldmask;
     int playerNo = 1;
 	char data[50] = {0};
-	int* arg;
 
 	
 	// set base_rfds once and use in the loop to reset rfds
@@ -373,7 +359,7 @@ int main(int argc, char** argv)
 	int numPlayers = atoi(argv[2]);
 	int boardSize = atoi(argv[3]);
 
-	if (numPlayers < 2 || numPlayers> 5 || boardSize < numPlayers || board > numPlayers * 5)
+	if (numPlayers < 2 || numPlayers> 5 || boardSize < numPlayers || boardSize > numPlayers * 5)
 	{
 		usage(argv[0]);
 		return EXIT_FAILURE;
