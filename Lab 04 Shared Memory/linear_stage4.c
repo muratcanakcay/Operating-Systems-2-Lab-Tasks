@@ -192,7 +192,7 @@ void outOfBoard(int playerNo, gamedata_t* gameData)
 {
 	char data[] = "You lost: You stepped out of the board!\n";
 	int cfd = gameData->cfds[playerNo - 1];
-	gameData->board[playerNo -1] = 0;
+	gameData->board[gameData->players[playerNo - 1].pos] = 0;
 
 	if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
 	if(TEMP_FAILURE_RETRY(close(cfd))<0)ERR("close");
@@ -213,6 +213,10 @@ int makeMove(int move, int playerNo, gamedata_t* gameData)
 		fprintf(stderr, "player %d moved to: %d whic is invalid\n", playerNo, newPos);
 		outOfBoard(playerNo, gameData);
 	}
+
+	gameData->board[gameData->players[playerNo - 1].pos] = 0;
+	gameData->players[playerNo - 1].pos = newPos;
+	gameData->board[newPos] = playerNo;
 
 	return 0;
 }
