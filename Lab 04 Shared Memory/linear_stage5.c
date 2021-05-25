@@ -164,7 +164,14 @@ int sendBoard(gamedata_t* gameData)
 	int* board = gameData->board;
 	int cfd = gameData->cfds[getPlayerNo(gameData) - 1];
 	
-	// PUT READ SEMAPHORE HERE!!!!
+	
+	
+	if (TEMP_FAILURE_RETRY(sem_wait(gameData->readSem)) == -1) 
+	{
+		if(errno == EINTR); // HANDLE SIGINT!;
+		else ERR("sem_wait");
+	}
+	fprintf(stderr, "readSem locked by Player %d\n", getPlayerNo(gameData));
 
 	snprintf(data, 50, "|");
 	for (int i = 0; i < boardSize - 1; i++) 
@@ -179,6 +186,9 @@ int sendBoard(gamedata_t* gameData)
 	snprintf(data+(2*(boardSize-1))+2, 50-(2*(boardSize-1))-2, "|\n");
 	
 	if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
+
+	if (sem_post(gameData->readSem) == -1) ERR("sem_post");
+	fprintf(stderr, "readSem unlocked by Player %d\n", getPlayerNo(gameData));
 
 	return 0;
 }
@@ -344,7 +354,7 @@ void* playerThread(void* voidData)
                 buf[ret-2] = '\0'; // remove endline char
 				if (processMsg(buf, playerNo, gameData) == 0)
 				{
-					fprintf(stderr, "RECEIVED MESSAGE: \"%s\" with size %d\n", buf, ret);
+					fprintf(stderr, "RECEIVED MESSAGE: \"%s\" from player %d\n", buf, playerNo);
 					//processMsg(buf, gameData, playerNo)
 				}
 			}
