@@ -214,6 +214,26 @@ void steppedOn(int playerNo, int deadPlayerCfd)
 	if(TEMP_FAILURE_RETRY(close(deadPlayerCfd))<0)ERR("close");
 }
 
+void restartGame(gamedata_t* gameData)
+{
+	gameData->dead = 0;
+	gameData->connectedPlayers = 0;
+	
+	for (int i = 0; i < gameData->numPlayers; i++) gameData->cfds[i] = -1;
+	for (int i = 0; i < gameData->boardSize; i++) gameData->board[i] = 0;
+	
+	free (gameData->players);
+	player_t* players;
+	if ( (players = (player_t*) calloc(gameData->numPlayers, sizeof(player_t))) == NULL ) ERR("players malloc)");
+	gameData->players = players;
+	
+	for(int i = 0; i < gameData->numPlayers; i++)
+	{
+		gameData->players[i].seed = rand();
+		gameData->players[i].pos = -1;
+	}
+}
+
 int makeMove(int move, int playerNo, gamedata_t* gameData)
 {
 	int boardSize = gameData->boardSize;
@@ -268,7 +288,7 @@ int makeMove(int move, int playerNo, gamedata_t* gameData)
 	if (gameData->dead == gameData->numPlayers - 1)
 	{
 		if(bulk_write(cfd, winMsg, strlen(winMsg)) < 0 && errno!=EPIPE) ERR("write:");
-		gameData->connectedPlayers = 0;
+		restartGame(gameData);
 		if(TEMP_FAILURE_RETRY(close(cfd))<0)ERR("close");
 	}
 
@@ -417,16 +437,15 @@ void doServer(gamedata_t* gameData){
 					continue;
 				} 
 				
-				snprintf(data, 50, "You are player#%d. Please wait...\n", playerNo);
+				gameData->cfds[gameData->connectedPlayers++] = cfd;
+				snprintf(data, 50, "You are player#%d. Please wait...\n", gameData->connectedPlayers);
 				if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
 				//if(TEMP_FAILURE_RETRY(close(cfd))<0)ERR("close");
-				gameData->cfds[playerNo - 1] = cfd;
-				gameData->connectedPlayers++;
 				fprintf(stderr, "Added player %d with fd: %d Active connections: %d.\n", playerNo, gameData->cfds[playerNo-1], gameData->connectedPlayers);
 				
 				HERE;
 				
-				if (playerNo == gameData->numPlayers)
+				if (gameData->connectedPlayers == gameData->numPlayers)
 				{
 					for(int i = 0; i < gameData->numPlayers; i++)
 					{
@@ -445,6 +464,50 @@ void doServer(gamedata_t* gameData){
         }
 	}
 	sigprocmask (SIG_UNBLOCK, &mask, NULL);
+}
+
+void initializeGame(gamedata_t* gameData, int numPlayers, int boardSize, int fdT)
+{
+	gameData->dead = 0;
+	gameData->connectedPlayers = 0;
+	gameData->numPlayers = numPlayers;
+	gameData->boardSize = boardSize;
+	gameData->fdT = fdT;
+	
+	player_t* players;
+	if ( (players = (player_t*) calloc(gameData->numPlayers, sizeof(player_t))) == NULL ) ERR("players malloc)");
+	
+	int* board;
+	if ( (board = (int*) calloc(gameData->boardSize, sizeof(int))) == NULL ) ERR("board malloc)");
+
+	int* cfds;
+	if ( (cfds = (int*) malloc(gameData->numPlayers * sizeof(int))) == NULL ) ERR("cfds malloc)");
+	for (int i = 0; i < gameData->numPlayers; i++) cfds[i] = -1;
+
+	sem_t* cellSems;
+	if ( (cellSems = (sem_t*) malloc(gameData->boardSize * sizeof(sem_t))) == NULL ) ERR("cellSems malloc)");
+	for (int i = 0; i < gameData->boardSize; i++) if (sem_init(&cellSems[i], 0, 1) != 0) ERR("sem_init");;
+	
+	sem_t* initSem;
+	if ( (initSem = (sem_t*) malloc(sizeof(sem_t))) == NULL ) ERR("initSem malloc)");
+	if (sem_init(initSem, 0, 1) != 0) ERR("sem_init");
+	
+	sem_t* readSem;
+	if ( (readSem = (sem_t*) malloc(sizeof(sem_t))) == NULL ) ERR("readSem malloc)");
+	if (sem_init(readSem, 0, 1) != 0) ERR("sem_init");
+
+	gameData->board = board;
+	gameData->initSem = initSem;
+	gameData->readSem = readSem;
+	gameData->cellSems = cellSems;
+	gameData->players = players;
+	gameData->cfds = cfds;
+
+	for(int i = 0; i < gameData->numPlayers; i++)
+	{
+		gameData->players[i].seed = rand();
+		gameData->players[i].pos = -1;
+	}
 }
 
 int main(int argc, char** argv) 
@@ -481,46 +544,11 @@ int main(int argc, char** argv)
 	new_flags = fcntl(fdT, F_GETFL) | O_NONBLOCK;
 	fcntl(fdT, F_SETFL, new_flags);
 	
-	gameData.dead = 0;
-	gameData.connectedPlayers = 0;
-	gameData.numPlayers = numPlayers;
-	gameData.boardSize = boardSize;
-	gameData.fdT = fdT;
-
+	
 	// init
-	
-	player_t* players;
-	if ( (players = (player_t*) calloc(gameData.numPlayers, sizeof(player_t))) == NULL ) ERR("players malloc)");
-	
-	int* board;
-	if ( (board = (int*) calloc(gameData.boardSize, sizeof(int))) == NULL ) ERR("board malloc)");
 
-	int* cfds;
-	if ( (cfds = (int*) malloc(gameData.numPlayers * sizeof(int))) == NULL ) ERR("board malloc)");
-	for (int i = 0; i < gameData.numPlayers; i++) cfds[i] = -1;
-
-	sem_t* cellSems;
-	if ( (cellSems = (sem_t*) malloc(gameData.boardSize * sizeof(sem_t))) == NULL ) ERR("board malloc)");
-	for (int i = 0; i < gameData.boardSize; i++) if (sem_init(&cellSems[i], 0, 1) != 0) ERR("sem_init");;
+	initializeGame(&gameData, numPlayers, boardSize, fdT);
 	
-	sem_t initSem;
-	if (sem_init(&initSem, 0, 1) != 0) ERR("sem_init");
-	
-	sem_t readSem;
-	if (sem_init(&readSem, 0, 1) != 0) ERR("sem_init");
-
-	gameData.board = board;
-	gameData.initSem = &initSem;
-	gameData.readSem = &readSem;
-	gameData.cellSems = cellSems;
-	gameData.players = players;
-	gameData.cfds = cfds;
-	
-	for(int i = 0; i < gameData.numPlayers; i++)
-	{
-		gameData.players[i].seed = rand();
-		gameData.players[i].pos = -1;
-	}
 	
 	// accept connections and read data
 	doServer(&gameData);
