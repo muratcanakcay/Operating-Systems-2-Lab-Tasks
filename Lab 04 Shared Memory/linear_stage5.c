@@ -43,7 +43,9 @@ typedef struct player_t
 typedef struct gamedata_t
 {
 	int boardSize;
+	int dead;
 	int numPlayers;
+	int connectedPlayers;
 	int fdT;
 	int* board;
 	int* cfds;
@@ -218,6 +220,7 @@ int makeMove(int move, int playerNo, gamedata_t* gameData)
 	int* board = gameData->board;
 	int cfd = gameData->cfds[playerNo - 1];
 	int oldPos = gameData->players[playerNo - 1].pos;
+	char winMsg[] = "You have won!\n";
 
 	fprintf(stderr, "player %d making move: %d\n", playerNo, move);
 
@@ -250,12 +253,23 @@ int makeMove(int move, int playerNo, gamedata_t* gameData)
 		}
 		fprintf(stderr, "Sem %d locked by Player %d for entering\n", newPos, playerNo);
 		
-		if(gameData->board[newPos] != 0) steppedOn(playerNo, gameData->cfds[gameData->board[newPos] - 1]);
+		if(gameData->board[newPos] != 0) 
+		{
+			steppedOn(playerNo, gameData->cfds[gameData->board[newPos] - 1]);
+			gameData->dead++;
+		}
 		gameData->board[newPos] = playerNo;
 		gameData->players[playerNo - 1].pos = newPos;
 
 		if (sem_post(&gameData->cellSems[newPos]) == -1) ERR("sem_post");
 		fprintf(stderr, "Sem %d unlocked by Player %d after entering\n", newPos, playerNo);
+	}
+
+	if (gameData->dead == gameData->numPlayers - 1)
+	{
+		if(bulk_write(cfd, winMsg, strlen(winMsg)) < 0 && errno!=EPIPE) ERR("write:");
+		gameData->connectedPlayers = 0;
+		if(TEMP_FAILURE_RETRY(close(cfd))<0)ERR("close");
 	}
 
 	return 0;
@@ -369,13 +383,13 @@ void* playerThread(void* voidData)
 // pselect
 void doServer(gamedata_t* gameData){
 	int cfd, cons = 0;
-	
 	int fdT = gameData->fdT;
 	
 	fd_set base_rfds, rfds ;
 	sigset_t mask, oldmask;
     int playerNo = 1;
 	char data[50] = {0};
+	char gamestarted[] = "Game already started. Wait for the next round!\n";
 
 	
 	// set base_rfds once and use in the loop to reset rfds
@@ -396,12 +410,19 @@ void doServer(gamedata_t* gameData){
 			//  new client connection
 			if((cfd = add_new_client(fdT)) >= 0)  // why >= ??
             {
+				if(gameData->connectedPlayers == gameData->numPlayers)
+				{
+					if (bulk_write(cfd, gamestarted, sizeof(gamestarted)) < 0 && errno!=EPIPE) ERR("write:");
+					if (TEMP_FAILURE_RETRY(close(cfd)) < 0) ERR("close");
+					continue;
+				} 
+				
 				snprintf(data, 50, "You are player#%d. Please wait...\n", playerNo);
 				if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
 				//if(TEMP_FAILURE_RETRY(close(cfd))<0)ERR("close");
 				gameData->cfds[playerNo - 1] = cfd;
-				cons++;
-				fprintf(stderr, "Added player %d with fd: %d Active connections: %d.\n", playerNo, gameData->cfds[playerNo-1], cons);
+				gameData->connectedPlayers++;
+				fprintf(stderr, "Added player %d with fd: %d Active connections: %d.\n", playerNo, gameData->cfds[playerNo-1], gameData->connectedPlayers);
 				
 				HERE;
 				
@@ -418,7 +439,7 @@ void doServer(gamedata_t* gameData){
 			}
             else
             {
-                if(EINTR==errno) continue;
+                if(EINTR == errno) continue;
                 ERR("pselect");
             }
         }
@@ -460,6 +481,8 @@ int main(int argc, char** argv)
 	new_flags = fcntl(fdT, F_GETFL) | O_NONBLOCK;
 	fcntl(fdT, F_SETFL, new_flags);
 	
+	gameData.dead = 0;
+	gameData.connectedPlayers = 0;
 	gameData.numPlayers = numPlayers;
 	gameData.boardSize = boardSize;
 	gameData.fdT = fdT;
