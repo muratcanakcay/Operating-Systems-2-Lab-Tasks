@@ -27,8 +27,10 @@
 
 volatile sig_atomic_t do_work=1 ;
 
-void usage(char * name){
-	fprintf(stderr,"USAGE: %s socket port\n",name);
+void usage(char * name)
+{
+	fprintf(stderr,"USAGE: %s portNo numPlayers boardSize\n", name);
+	exit(EXIT_FAILURE);
 }
 
 typedef unsigned int UINT;
@@ -43,15 +45,14 @@ typedef struct player_t
 typedef struct gamedata_t
 {
 	int boardSize;
-	int dead;
+	int deadPlayers;
 	int numPlayers;
 	int connectedPlayers;
 	int fdT;
 	int* board;
 	int* cfds;
 	player_t* players;
-	sem_t* initSem;
-	sem_t* readSem;
+	sem_t* boardSem;
 	sem_t* cellSems;
 } gamedata_t;
 
@@ -168,12 +169,12 @@ int sendBoard(gamedata_t* gameData)
 	
 	
 	
-	if (TEMP_FAILURE_RETRY(sem_wait(gameData->readSem)) == -1) 
+	if (TEMP_FAILURE_RETRY(sem_wait(gameData->boardSem)) == -1) 
 	{
 		if(errno == EINTR); // HANDLE SIGINT!;
 		else ERR("sem_wait");
 	}
-	fprintf(stderr, "readSem locked by Player %d\n", getPlayerNo(gameData));
+	fprintf(stderr, "boardSem locked by Player %d\n", getPlayerNo(gameData));
 
 	snprintf(data, 50, "|");
 	for (int i = 0; i < boardSize - 1; i++) 
@@ -189,8 +190,8 @@ int sendBoard(gamedata_t* gameData)
 	
 	if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
 
-	if (sem_post(gameData->readSem) == -1) ERR("sem_post");
-	fprintf(stderr, "readSem unlocked by Player %d\n", getPlayerNo(gameData));
+	if (sem_post(gameData->boardSem) == -1) ERR("sem_post");
+	fprintf(stderr, "boardSem unlocked by Player %d\n", getPlayerNo(gameData));
 
 	return 0;
 }
@@ -206,17 +207,17 @@ void outOfBoard(int playerNo, gamedata_t* gameData)
 	
 }
 
-void steppedOn(int playerNo, int deadPlayerCfd)
+void steppedOn(int playerNo, int deadPlayersPlayerCfd)
 {
 	char data[50] = "";
 	snprintf(data, 50, "PLAYER#%d stepped on you!\n", playerNo);
-	if(bulk_write(deadPlayerCfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
-	if(TEMP_FAILURE_RETRY(close(deadPlayerCfd))<0)ERR("close");
+	if(bulk_write(deadPlayersPlayerCfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
+	if(TEMP_FAILURE_RETRY(close(deadPlayersPlayerCfd))<0)ERR("close");
 }
 
 void restartGame(gamedata_t* gameData)
 {
-	gameData->dead = 0;
+	gameData->deadPlayers = 0;
 	gameData->connectedPlayers = 0;
 	
 	for (int i = 0; i < gameData->numPlayers; i++) gameData->cfds[i] = -1;
@@ -234,10 +235,45 @@ void restartGame(gamedata_t* gameData)
 	}
 }
 
+void moveOut(int playerNo, int oldPos, gamedata_t* gameData)
+{
+	if (TEMP_FAILURE_RETRY(sem_wait(&gameData->cellSems[oldPos])) == -1) 
+		{
+			if(errno == EINTR); // HANDLE SIGINT!;
+			else ERR("sem_wait");
+		}
+		fprintf(stderr, "Sem %d locked by Player %d for leaving\n", oldPos, playerNo);
+
+		gameData->board[gameData->players[playerNo - 1].pos] = 0;
+		
+		if (sem_post(&gameData->cellSems[oldPos]) == -1) ERR("sem_post");
+		fprintf(stderr, "Sem %d unlocked by Player %d after leaving\n", oldPos, playerNo);
+}
+
+void moveIn(int playerNo, int newPos, gamedata_t* gameData)
+{
+	if (TEMP_FAILURE_RETRY(sem_wait(&gameData->cellSems[newPos])) == -1) 
+		{
+			if(errno == EINTR); // HANDLE SIGINT!;
+			else ERR("sem_wait");
+		}
+		fprintf(stderr, "Sem %d locked by Player %d for entering\n", newPos, playerNo);
+		
+		if(gameData->board[newPos] != 0) 
+		{
+			steppedOn(playerNo, gameData->cfds[gameData->board[newPos] - 1]);
+			gameData->deadPlayers++;
+		}
+		gameData->board[newPos] = playerNo;
+		gameData->players[playerNo - 1].pos = newPos;
+
+		if (sem_post(&gameData->cellSems[newPos]) == -1) ERR("sem_post");
+		fprintf(stderr, "Sem %d unlocked by Player %d after entering\n", newPos, playerNo);
+}
+
 int makeMove(int move, int playerNo, gamedata_t* gameData)
 {
 	int boardSize = gameData->boardSize;
-	int* board = gameData->board;
 	int cfd = gameData->cfds[playerNo - 1];
 	int oldPos = gameData->players[playerNo - 1].pos;
 	char winMsg[] = "You have won!\n";
@@ -252,40 +288,11 @@ int makeMove(int move, int playerNo, gamedata_t* gameData)
 	}
 	else 
 	{
-		// move out of old position
-		if (TEMP_FAILURE_RETRY(sem_wait(&gameData->cellSems[oldPos])) == -1) 
-		{
-			if(errno == EINTR); // HANDLE SIGINT!;
-			else ERR("sem_wait");
-		}
-		fprintf(stderr, "Sem %d locked by Player %d for leaving\n", oldPos, playerNo);
-
-		gameData->board[gameData->players[playerNo - 1].pos] = 0;
-		
-		if (sem_post(&gameData->cellSems[oldPos]) == -1) ERR("sem_post");
-		fprintf(stderr, "Sem %d unlocked by Player %d after leaving\n", oldPos, playerNo);
-		
-		// move into new position
-		if (TEMP_FAILURE_RETRY(sem_wait(&gameData->cellSems[newPos])) == -1) 
-		{
-			if(errno == EINTR); // HANDLE SIGINT!;
-			else ERR("sem_wait");
-		}
-		fprintf(stderr, "Sem %d locked by Player %d for entering\n", newPos, playerNo);
-		
-		if(gameData->board[newPos] != 0) 
-		{
-			steppedOn(playerNo, gameData->cfds[gameData->board[newPos] - 1]);
-			gameData->dead++;
-		}
-		gameData->board[newPos] = playerNo;
-		gameData->players[playerNo - 1].pos = newPos;
-
-		if (sem_post(&gameData->cellSems[newPos]) == -1) ERR("sem_post");
-		fprintf(stderr, "Sem %d unlocked by Player %d after entering\n", newPos, playerNo);
+		moveOut(playerNo, oldPos, gameData);
+		moveIn(playerNo, newPos, gameData);
 	}
 
-	if (gameData->dead == gameData->numPlayers - 1)
+	if (gameData->deadPlayers == gameData->numPlayers - 1)
 	{
 		if(bulk_write(cfd, winMsg, strlen(winMsg)) < 0 && errno!=EPIPE) ERR("write:");
 		restartGame(gameData);
@@ -306,47 +313,25 @@ int processMsg(char* msg, int playerNo, gamedata_t* gameData) // check if the me
 	else return -1;
 }
 
-void* playerThread(void* voidData)
+void placePlayer(gamedata_t* gameData)
 {
-	gamedata_t* gameData = (gamedata_t*)voidData;
-	
-	HERE;
-
-	fd_set base_rfds, rfds, wfds;
-	sigset_t mask, oldmask;
-    int ret = 0;
 	int playerNo = getPlayerNo(gameData);
-	int cfd= gameData->cfds[playerNo - 1];
-	int pos = gameData->players[playerNo - 1].pos;
 	UINT seed = gameData->players[playerNo - 1].seed;
+	int pos = gameData->players[playerNo - 1].pos;
+	sem_t* boardSem = gameData->boardSem;
 	int boardSize = gameData->boardSize;
 	int* board = gameData->board;
-	sem_t* initSem = gameData->initSem;
-	char data[50] = {0};
-	char buf[MAXBUF] = "";
-	
-	// set base_rfds once and use in the loop to reset rfds
-	FD_ZERO(&base_rfds);
-	FD_SET(cfd, &base_rfds);
-	
-	// set signal mask for pselect
-	sigemptyset (&mask);
-	sigaddset (&mask, SIGINT);
-	sigprocmask (SIG_BLOCK, &mask, &oldmask);
-	
-	snprintf(data, 50, "The game has started player %d\n", playerNo);
-	if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
+	bool playerNotPlaced = true;
 
-	bool placed = false;
-	while(!placed)
+	while(playerNotPlaced)
 	{
-		if (TEMP_FAILURE_RETRY(sem_trywait(initSem)) == -1) 
+		if (TEMP_FAILURE_RETRY(sem_trywait(boardSem)) == -1) 
 		{
 			if(errno == EAGAIN || errno == EINTR) continue;
 			else ERR("sem_wait");
 		}
 
-		fprintf(stderr, "initSem locked by Player %d\n", playerNo);
+		fprintf(stderr, "boardSem locked by Player %d\n", playerNo);
 
 		while (pos == -1) 
 		{
@@ -361,19 +346,47 @@ void* playerThread(void* voidData)
 				gameData->players[playerNo - 1].pos = pos;
 
 				fprintf(stderr, "player %d placed at position %d\n", playerNo, tryPos);
-				placed = true;
+				playerNotPlaced = false;
 			}
 			else fprintf(stderr, "cannot place player %d at position %d which is occupped by player %d\n", playerNo, tryPos, board[tryPos]); 
 		}
 	}
 
-	fprintf(stderr, "initSem unlocked by Player %d\n", playerNo);
-	if (sem_post(initSem) == -1) ERR("sem_post");
-
-	//printBoard(board, boardSize);
+	fprintf(stderr, "boardSem unlocked by Player %d\n", playerNo);
+	if (sem_post(boardSem) == -1) ERR("sem_post");
 	
 	msleep(100);
 	sendBoard(gameData);
+}
+
+void* playerThread(void* voidData)
+{
+	gamedata_t* gameData = (gamedata_t*)voidData;
+	
+	HERE;
+
+	fd_set base_rfds, rfds, wfds;
+	sigset_t mask, oldmask;
+    int ret = 0;
+	int playerNo = getPlayerNo(gameData);
+	int cfd= gameData->cfds[playerNo - 1];
+	
+	char data[50] = "";
+	char buf[MAXBUF] = "";
+	
+	// set base_rfds once and use in the loop to reset rfds
+	FD_ZERO(&base_rfds);
+	FD_SET(cfd, &base_rfds);
+	
+	// set signal mask for pselect
+	sigemptyset (&mask);
+	sigaddset (&mask, SIGINT);
+	sigprocmask (SIG_BLOCK, &mask, &oldmask);
+	
+	snprintf(data, 50, "The game has started player %d\n", playerNo);
+	if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
+
+	placePlayer(gameData);
 
 	while(do_work)
     {
@@ -386,31 +399,25 @@ void* playerThread(void* voidData)
 			{
 				if ((ret = recv(cfd, buf, MAXBUF, 0)) < 0) ERR("recv"); 
                 buf[ret-2] = '\0'; // remove endline char
+				
 				if (processMsg(buf, playerNo, gameData) == 0)
-				{
 					fprintf(stderr, "RECEIVED MESSAGE: \"%s\" from player %d\n", buf, playerNo);
-					//processMsg(buf, gameData, playerNo)
-				}
 			}
         }
 	}
+	
 	sigprocmask (SIG_UNBLOCK, &mask, NULL);
-
 	return NULL;
 }
 
-
-// pselect
 void doServer(gamedata_t* gameData){
-	int cfd, cons = 0;
+	int cfd;
 	int fdT = gameData->fdT;
-	
-	fd_set base_rfds, rfds ;
-	sigset_t mask, oldmask;
-    int playerNo = 1;
-	char data[50] = {0};
+	char data[50] = "";
 	char gamestarted[] = "Game already started. Wait for the next round!\n";
 
+	fd_set base_rfds, rfds ;
+	sigset_t mask, oldmask;
 	
 	// set base_rfds once and use in the loop to reset rfds
 	FD_ZERO(&base_rfds);
@@ -440,8 +447,7 @@ void doServer(gamedata_t* gameData){
 				gameData->cfds[gameData->connectedPlayers++] = cfd;
 				snprintf(data, 50, "You are player#%d. Please wait...\n", gameData->connectedPlayers);
 				if(bulk_write(cfd, data, strlen(data)) < 0 && errno!=EPIPE) ERR("write:");
-				//if(TEMP_FAILURE_RETRY(close(cfd))<0)ERR("close");
-				fprintf(stderr, "Added player %d with fd: %d Active connections: %d.\n", playerNo, gameData->cfds[playerNo-1], gameData->connectedPlayers);
+				fprintf(stderr, "Added player %d with fd: %d Active connections: %d.\n", gameData->connectedPlayers, gameData->cfds[gameData->connectedPlayers - 1], gameData->connectedPlayers);
 				
 				HERE;
 				
@@ -453,8 +459,6 @@ void doServer(gamedata_t* gameData){
 						if (pthread_create(&gameData->players[i].tid, NULL, playerThread, gameData)) ERR("pthread_create");
 					}
 				}
-
-				playerNo++;
 			}
             else
             {
@@ -468,7 +472,7 @@ void doServer(gamedata_t* gameData){
 
 void initializeGame(gamedata_t* gameData, int numPlayers, int boardSize, int fdT)
 {
-	gameData->dead = 0;
+	gameData->deadPlayers = 0;
 	gameData->connectedPlayers = 0;
 	gameData->numPlayers = numPlayers;
 	gameData->boardSize = boardSize;
@@ -476,32 +480,26 @@ void initializeGame(gamedata_t* gameData, int numPlayers, int boardSize, int fdT
 	
 	player_t* players;
 	if ( (players = (player_t*) calloc(gameData->numPlayers, sizeof(player_t))) == NULL ) ERR("players malloc)");
+	gameData->players = players;
 	
 	int* board;
 	if ( (board = (int*) calloc(gameData->boardSize, sizeof(int))) == NULL ) ERR("board malloc)");
+	gameData->board = board;
 
 	int* cfds;
 	if ( (cfds = (int*) malloc(gameData->numPlayers * sizeof(int))) == NULL ) ERR("cfds malloc)");
 	for (int i = 0; i < gameData->numPlayers; i++) cfds[i] = -1;
+	gameData->cfds = cfds;
 
 	sem_t* cellSems;
 	if ( (cellSems = (sem_t*) malloc(gameData->boardSize * sizeof(sem_t))) == NULL ) ERR("cellSems malloc)");
 	for (int i = 0; i < gameData->boardSize; i++) if (sem_init(&cellSems[i], 0, 1) != 0) ERR("sem_init");;
-	
-	sem_t* initSem;
-	if ( (initSem = (sem_t*) malloc(sizeof(sem_t))) == NULL ) ERR("initSem malloc)");
-	if (sem_init(initSem, 0, 1) != 0) ERR("sem_init");
-	
-	sem_t* readSem;
-	if ( (readSem = (sem_t*) malloc(sizeof(sem_t))) == NULL ) ERR("readSem malloc)");
-	if (sem_init(readSem, 0, 1) != 0) ERR("sem_init");
-
-	gameData->board = board;
-	gameData->initSem = initSem;
-	gameData->readSem = readSem;
 	gameData->cellSems = cellSems;
-	gameData->players = players;
-	gameData->cfds = cfds;
+	
+	sem_t* boardSem;
+	if ( (boardSem = (sem_t*) malloc(sizeof(sem_t))) == NULL ) ERR("boardSem malloc)");
+	if (sem_init(boardSem, 0, 1) != 0) ERR("sem_init");
+	gameData->boardSem = boardSem;
 
 	for(int i = 0; i < gameData->numPlayers; i++)
 	{
@@ -514,46 +512,36 @@ int main(int argc, char** argv)
 {
 	srand(time(NULL));
 	struct gamedata_t gameData;
-	
-	int fdT;
 	int new_flags;
+	int fdT;
 
-	if(argc!=4) 
-    {
+	if (argc!=4 || atoi(argv[2]) < 2 || atoi(argv[2]) > 5 || atoi(argv[3]) < atoi(argv[2]) || atoi(argv[3]) > atoi(argv[2]) * 5)
+	{
 		usage(argv[0]);
-		return EXIT_FAILURE;
     }
 
 	int portNo = atoi(argv[1]);
 	int numPlayers = atoi(argv[2]);
 	int boardSize = atoi(argv[3]);
-
-	if (numPlayers < 2 || numPlayers> 5 || boardSize < numPlayers || boardSize > numPlayers * 5)
-	{
-		usage(argv[0]);
-		return EXIT_FAILURE;
-    }
 	
 	if(sethandler(SIG_IGN,SIGPIPE)) ERR("Seting SIGPIPE:");
 	if(sethandler(sigint_handler,SIGINT)) ERR("Seting SIGINT:");
 	
-	// make and bind both local and tcp sockets
+	// make and bind tcp socket in non-blocking mode
 	fdT = bind_tcp_socket(portNo);
-	
-	// set both local and tcp sockets to nonblocking
 	new_flags = fcntl(fdT, F_GETFL) | O_NONBLOCK;
 	fcntl(fdT, F_SETFL, new_flags);
 	
-	
-	// init
-
+	// initialize gameData
 	initializeGame(&gameData, numPlayers, boardSize, fdT);
 	
-	
-	// accept connections and read data
+	// start Game
 	doServer(&gameData);
 	
 	if (TEMP_FAILURE_RETRY(close(fdT))<0) ERR("close");
 	fprintf(stderr,"Server has terminated.\n");
+
+	// endGame(gameData) // free resources
+
 	return EXIT_SUCCESS;
 }
