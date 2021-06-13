@@ -1,0 +1,29 @@
+Goal: Write n-process program where n child processes communicate with parent over one shared pipe R and parent communicates with children using n dedicated pipes P1,P2,...,Pn
+
+On C-c parent process chooses random pipe Pk (where k in [1,n]) and sends random [a-z] char to it. On the same signal child processes terminate with 20% probability. Child process that can read char C on its dedicated pipe should send a random size [1,200] buffer of chars C via parent pipe R.
+
+Parent process should print everything it receives on R pipe as soon as possible and terminate when all the child processes are gone.
+
+Let's split the solution into 2 stages.
+
+==============
+
+STAGE1: (prog22a.c)
+
+Create n child processes.
+Create pipes.
+Close unused descriptors.
+Initiate random numbers.
+Parent process awaits data on pipe R and prints them on the stdout, it terminates after all data is processed.
+Child process sends random char on R pipe and exits.
+
+
+==============
+
+STAGE2: (prog22b.c)
+
+STAGE2:
+
+Add SIGINT handling.
+Protect system function from interruption by the signal handling function (all the code).
+Add missing code.
