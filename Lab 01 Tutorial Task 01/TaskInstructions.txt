@@ -1,0 +1,35 @@
+Goal:
+
+Write client server application, communication between clients and the server is based on single shared FIFO. The server reads data from the connection,removes all non-alphanumerical characters from this input and prints processed data on the standard output along with senders PID number. Client input data comes from the file opened by the client (name of the file is one of the client parameters).
+
+Client application terminates as soon as all the file is sent. Server application terminates as soon as all clients disconnect from its FIFO. Both programs should correctly react to the lost connection on FIFO!
+
+Let's split the solution into the stages.
+
+==============
+
+STAGE 1: (prog21a_s.c)
+
+Prepare simplified server that will create FIFO and will read data from it. What comes out of the FIFO will be filtered (alphanumeric chars only) and printed on the screen.
+Use command "cat" as the client. 
+
+(Execution: ./prog21a_s a & sleep 1; cat prog21a_s.c > a)
+
+==============
+
+STAGE2: (prog21a_s and prog21_c.c)
+
+Prepare complete client program, it reads files and sends it via FIFO in PIPE_BUF chunks.
+All chunks sent must be of PIPE_BUF size, including the last one.
+Each chunk sent must be tagged with PID nuber. 
+
+(Execution: ./prog21a_s a & ./prog21_c a prog21a_s.c)
+
+==============
+
+STAGE3: (prog21b_s.c and prog21_c.c)
+
+Add chunking on the server side.
+Add FIFO removal
+
+(Execution: ./prog21_c a Makefile & ./prog21_c a prog21b_s.c & ./prog21_c a prog21_c.c & sleep 1; ./prog21b_s a)
