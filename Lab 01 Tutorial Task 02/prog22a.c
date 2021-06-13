@@ -75,7 +75,7 @@ void create_children_and_pipes(int n, int *fds, int R)
 		{
 			case 0: // child
 				
-				// fds not used at this stage so free it
+				// close fds of previous childs
 				while (n < max) if (fds[n] && close(fds[n++])) ERR("close");
 				free(fds);
 				
@@ -92,7 +92,7 @@ void create_children_and_pipes(int n, int *fds, int R)
 		}
 
 		if (close(tmpfd[0])) ERR("close"); //close read end for parent
-		fds[--n] = tmpfd[1];
+		fds[--n] = tmpfd[1]; // put child's read fd into fds so parent can use it to write to
 	}
 }
 
@@ -119,6 +119,6 @@ int main(int argc, char** argv)
 	while(n--) if (fds[n] && close(fds[n])) ERR("fds close");
 	if (close(R[0])) ERR("R close"); // close read R[0] for parent
 	
-	free(fds); // free fds - it was not used at this stage anyway
+	free(fds);
 	return EXIT_SUCCESS;
 }
