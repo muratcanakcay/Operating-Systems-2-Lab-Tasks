@@ -12,10 +12,7 @@
                      perror(source),kill(0,SIGKILL),\
              exit(EXIT_FAILURE))
 
-//MAX_BUFF must be in one byte range
-#define MAX_BUFF 200
-
-void create_m_and_pipes();
+void create_m();
 
 void usage(char * name)
 {
@@ -56,7 +53,7 @@ void sigchld_handler(int sig)
 void c_work() 
 {
 	printf("c starting PID:%d\n", getpid());
-	create_m_and_pipes();
+	create_m();
 }
 
 void m_work() 
@@ -65,7 +62,7 @@ void m_work()
 	sleep(1);
 }
 
-void create_m_and_pipes()
+void create_m()
 {
 	switch (fork()) 
 	{
@@ -85,8 +82,6 @@ void create_c_and_pipes()
     int c = 2;
     while (c) 
     {
-        //if (pipe(tmpfd)) ERR("pipe");
-
         switch (fork()) 
         {
             case 0:
@@ -127,8 +122,6 @@ int main(int argc, char** argv)
     if (sethandler(sigchld_handler, SIGCHLD)) ERR("Setting parent SIGCHLD:");
     
     create_c_and_pipes(); 
-    
-    //parent_work();
     
     while(wait(NULL) > 0);
     return EXIT_SUCCESS;

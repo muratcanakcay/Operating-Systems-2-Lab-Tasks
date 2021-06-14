@@ -15,9 +15,6 @@
                      perror(source),kill(0,SIGKILL),\
              exit(EXIT_FAILURE))
 
-//MAX_BUFF must be in one byte range
-#define MAX_BUFF 200
-
 void create_m(int cpipe);
 
 void usage(char * name)
@@ -69,7 +66,7 @@ void parent_work(int ppipe)
         if (status < 0) ERR("read ppipe at parent");
 
         buf[1] = 0; // set end of buffer to zero
-        printf("\nParent received %s from c\n", buf);
+        printf("\n************Parent received %s from c\n\n", buf);
     }    
 }
 
@@ -192,8 +189,9 @@ int main(int argc, char** argv)
 	if (a<1   || a>PIPE_BUF) 	usage(argv[0]);
     if (b<a   || b>PIPE_BUF) 	usage(argv[0]);
 
-	printf("t=%d, n=%d, r=%d, a=%d b=%d\n", t, n, r, a, b);
-    
+    printf("t=%d, n=%d, r=%d, a=%d b=%d\n", t, n, r, a, b);
+
+    printf("parent process starting with PID:%d\n",getpid());    
     //if (sethandler(SIG_IGN, SIGINT)) ERR("Setting SIGINT handler");
     if (sethandler(SIG_IGN, SIGPIPE)) ERR("Setting SIGINT handler");
     if (sethandler(sigchld_handler, SIGCHLD)) ERR("Setting parent SIGCHLD:");
@@ -216,5 +214,7 @@ int main(int argc, char** argv)
     if (unlink("cfifo2file") < 0)ERR("remove cfifo2file:");
     
     while(wait(NULL) > 0);
+
+    printf("parent process exiting with PID:%d\n",getpid());    
     return EXIT_SUCCESS;
 }

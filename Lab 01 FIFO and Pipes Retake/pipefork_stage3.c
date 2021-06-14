@@ -15,9 +15,6 @@
                      perror(source),kill(0,SIGKILL),\
              exit(EXIT_FAILURE))
 
-//MAX_BUFF must be in one byte range
-#define MAX_BUFF 200
-
 typedef unsigned int UINT;
 typedef struct timespec timespec_t;
 
@@ -69,27 +66,31 @@ void sigchld_handler(int sig)
     }
 }
 
-void parent_work(int ppipe) 
+void parent_work() 
 {    
-    char buf[PIPE_BUF];
-    int status;
-	sleep(1);
+    char buf[PIPE_BUF] = "";
+    int pfifo, status;
+	msleep(200);
+
+    // open pfifofile for reading at parent
+    if ((pfifo = open("pfifofile", O_RDONLY))<0) ERR("pfifofile open at parent");
     
     while(1)
     {
-        status = TEMP_FAILURE_RETRY(read(ppipe, buf, 1));
+        status = TEMP_FAILURE_RETRY(read(pfifo, buf, 1));
         if (status == 0) break;
         if (status < 0) ERR("read ppipe at parent");
+        
+        printf("\n************Parent received %c from c\n\n", buf[0]);
+    }
 
-        buf[1] = 0; // set end of buffer to zero
-        printf("\nParent received %s from c\n", buf);
-    }    
+    if (close(pfifo)<0) perror("pfifo read end close at parent:");    
 }
 
 void c_work(int c, int n, int t) 
 {
 	int pfifo, cfifo, status;
-	char buf[PIPE_BUF];
+	char buf[PIPE_BUF] = "";
 	
 	printf("c%d starting PID:%d\n", c, getpid());
 	
@@ -125,7 +126,7 @@ void c_work(int c, int n, int t)
 	}
 
 	if (TEMP_FAILURE_RETRY(close(pfifo))) ERR("pfifo write end close at c");
-    if (TEMP_FAILURE_RETRY(close(cfifo))) ERR("pfifo write end close at c");
+    if (TEMP_FAILURE_RETRY(close(cfifo))) ERR("cfifo read end close at c");
 }
 
 void m_work(int c, int n, int t)
@@ -149,7 +150,7 @@ void m_work(int c, int n, int t)
 	while(i++ < n)
 	{
         buf[0] = 'a' + rand() % ('z'-'a');
-        printf("[%d] m with PID %d sending %c to c with PID %d\n", i, getpid(), buf[0], getppid());
+        printf("[n=%d] m%d with PID %d sending %c to c with PID %d\n", i, c, getpid(), buf[0], getppid());
         if (TEMP_FAILURE_RETRY(write(cfifo, buf, 1)) < 0) ERR("write to cpipe");
 
         msleep(t);
@@ -197,7 +198,7 @@ void create_c_and_pipe(int n, int t)
 
 int main(int argc, char** argv) 
 {
-    int t, n, r, b, a, pfifo; 
+    int t, n, r, b, a; 
     if (6 != argc) usage(argv[0]);
     
     t = atoi(argv[1]);
@@ -213,6 +214,7 @@ int main(int argc, char** argv)
 
 	printf("t=%d, n=%d, r=%d, a=%d b=%d\n", t, n, r, a, b);
     
+    printf("parent process starting with PID:%d\n",getpid());    
     //if (sethandler(SIG_IGN, SIGINT)) ERR("Setting SIGINT handler");
     if (sethandler(SIG_IGN, SIGPIPE)) ERR("Setting SIGINT handler");
     if (sethandler(sigchld_handler, SIGCHLD)) ERR("Setting parent SIGCHLD:");
@@ -221,19 +223,13 @@ int main(int argc, char** argv)
 		if (errno!=EEXIST) ERR("create pfifo");
 	
 	create_c_and_pipe(n, t);
+    parent_work();
     
-    // open pfifofile for reading from at parent
-    if ((pfifo = open("pfifofile", O_RDONLY))<0) ERR("pfifofile open at parent");
-
-    
-    parent_work(pfifo);
-    
-
-	if (close(pfifo)<0) perror("close pfifo:");
     if (unlink("pfifofile") < 0)ERR("remove pfifofile:");
     if (unlink("cfifo1file") < 0)ERR("remove cfifo1file:");
     if (unlink("cfifo2file") < 0)ERR("remove cfifo2file:");
     
     while(wait(NULL) > 0);
+    printf("parent process exiting with PID:%d\n",getpid());
     return EXIT_SUCCESS;
 }
