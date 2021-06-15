@@ -11,6 +11,7 @@
 #include <string.h>
 #include <time.h>
 #include <limits.h>
+#include <stdbool.h>
 #define ERR(source) (fprintf(stderr,"%s:%d\n",__FILE__,__LINE__),\
                      perror(source),kill(0,SIGKILL),\
              exit(EXIT_FAILURE))
@@ -67,9 +68,10 @@ void sigchld_handler(int sig)
 }
 
 void parent_work() 
-{    
-    char buf[PIPE_BUF] = "";
-    int pfifo, status;
+{   
+    char buf[PIPE_BUF * 2 + 1];
+    int pfifo, status, msg, childsLeft = 2;
+	
 	msleep(200);
 
     // open pfifofile for reading at parent
@@ -77,11 +79,20 @@ void parent_work()
     
     while(1)
     {
-        status = TEMP_FAILURE_RETRY(read(pfifo, buf, 1));
-        if (status == 0) break;
+		status = TEMP_FAILURE_RETRY(read(pfifo, buf, PIPE_BUF * 2));
         if (status < 0) ERR("read ppipe at parent");
-        
-        printf("\n************Parent received %d from c\n\n", buf[0]);
+        else if (status == 0) 
+        {
+            if (--childsLeft == 0) break;
+            else continue;
+        }
+
+        buf[status] = '\0';
+
+        printf("\n[%d]: [%d]: %s\n\n", msg, status, buf);
+        fflush(stdout);
+
+        ++msg;
     }
 
     if (close(pfifo)<0) perror("pfifo read end close at parent:");    
@@ -117,12 +128,16 @@ void c_work(int c, int n, int t, int r, int a, int b)
 
 	while(1)
 	{
-		status = read(cfifo, buf, 1);
-		if (0 == status) break;
+		char* buf;
+        if ((buf = (char*)malloc(PIPE_BUF)) == NULL) ERR("malloc");
+
+        status = read(cfifo, buf, PIPE_BUF);
+        if (0 == status) break;
 		if (status < 0) ERR("read byte from cpipe");
 
-		printf("c%d with PID %d sending %d to parent\n", c, getpid(), buf[0]);
-		if (TEMP_FAILURE_RETRY(write(pfifo, buf, 1)) < 0) ERR("write to pfifo");	
+        printf("c%d with PID %d transmitting message %s of size %lu to parent\n", c, getpid(), buf, strlen(buf));
+        if (TEMP_FAILURE_RETRY(write(pfifo, buf, status)) < 0) ERR("write to pfifo");
+        free(buf);
 	}
 
 	if (TEMP_FAILURE_RETRY(close(pfifo))) ERR("pfifo write end close at c");
@@ -131,9 +146,7 @@ void c_work(int c, int n, int t, int r, int a, int b)
 
 void m_work(int c, int n, int t, int r, int a, int b)
 {
-	int cfifo;
-    char buf[PIPE_BUF];
-
+	int cfifo, size;
 	printf("m%d starting PID:%d PPID:%d\n", c, getpid(), getppid());
 
     if (c == 1)
@@ -149,10 +162,16 @@ void m_work(int c, int n, int t, int r, int a, int b)
     int i = 0;
 	while(i++ < n)
 	{
-        buf[0] = rand() % 10;
-        printf("[n=%d] m%d with PID %d sending %d to c with PID %d\n", i, c, getpid(), buf[0], getppid());
-        if (TEMP_FAILURE_RETRY(write(cfifo, buf, 1)) < 0) ERR("write to cpipe");
+		int size = a + rand() % (b-a+1); // size between a and b
+        
+        char *buf;
+        if ((buf = malloc(size)) == NULL) ERR("malloc");
+        for (int j = 0; j < size; ++j) buf[j] = (rand() % 10) + '0';
 
+        printf("[n=%d] m%d with PID %d sending message %s to c with PID %d\n", i, c, getpid(), buf, getppid());
+        if (TEMP_FAILURE_RETRY(write(cfifo, buf, size) < 0)) ERR("write to cpipe");
+
+        free(buf);
         msleep(t);
     }
     
