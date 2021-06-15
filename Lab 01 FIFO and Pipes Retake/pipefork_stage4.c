@@ -18,7 +18,7 @@
 typedef unsigned int UINT;
 typedef struct timespec timespec_t;
 
-void create_m(int c, int n, int t);
+void create_m(int c, int n, int t, int r, int a, int b);
 
 void usage(char * name)
 {
@@ -87,7 +87,7 @@ void parent_work()
     if (close(pfifo)<0) perror("pfifo read end close at parent:");    
 }
 
-void c_work(int c, int n, int t) 
+void c_work(int c, int n, int t, int r, int a, int b) 
 {
 	int pfifo, cfifo, status;
 	char buf[PIPE_BUF] = "";
@@ -101,7 +101,7 @@ void c_work(int c, int n, int t)
         if ( mkfifo("cfifo1file", S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP) < 0 )
 		    if (errno!=EEXIST) ERR("create cfifo1file");
 
-        create_m(1, n, t);
+        create_m(1, n, t, r, a, b);
         
         if ((cfifo=open("cfifo1file", O_RDONLY))<0) ERR("cfifo1 open for c");
     }
@@ -110,7 +110,7 @@ void c_work(int c, int n, int t)
         if ( mkfifo("cfifo2file", S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP) < 0 )
 		    if (errno!=EEXIST) ERR("create cfifo2file");
 
-        create_m(2, n, t);
+        create_m(2, n, t, r, a, b);
 
         if ((cfifo=open("cfifo2file", O_RDONLY))<0) ERR("cfifo2 open for c");
     }
@@ -129,7 +129,7 @@ void c_work(int c, int n, int t)
     if (TEMP_FAILURE_RETRY(close(cfifo))) ERR("cfifo read end close at c");
 }
 
-void m_work(int c, int n, int t)
+void m_work(int c, int n, int t, int r, int a, int b)
 {
 	int cfifo;
     char buf[PIPE_BUF];
@@ -159,13 +159,13 @@ void m_work(int c, int n, int t)
     if (TEMP_FAILURE_RETRY(close(cfifo))) ERR("cfifo write end close at m");
 }
 
-void create_m(int c, int n, int t)
+void create_m(int c, int n, int t, int r, int a, int b)
 {
 	switch (fork()) 
 	{
 		case 0:
 			
-			m_work(c, n, t);
+			m_work(c, n, t, r, a, b);
 			
 			printf("m%d exiting PID:%d PPID:%d\n", c, getpid(), getppid());
 			exit(EXIT_SUCCESS);
@@ -174,7 +174,7 @@ void create_m(int c, int n, int t)
 	}
 }
 
-void create_c_and_pipe(int n, int t) 
+void create_c_and_pipe(int n, int t, int r, int a, int b) 
 {
     int c = 2; 
     while (c) 
@@ -183,7 +183,7 @@ void create_c_and_pipe(int n, int t)
         {
             case 0:
                 
-                c_work(c, n, t);
+                c_work(c, n, t, r, a, b);
 
 				while(wait(NULL) > 0);
 				printf("c%d exiting PID:%d\n", c, getpid());
@@ -222,7 +222,7 @@ int main(int argc, char** argv)
     if ( mkfifo("pfifofile", S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP) < 0 )
 		if (errno!=EEXIST) ERR("create pfifo");
 	
-	create_c_and_pipe(n, t);
+	create_c_and_pipe(n, t, r, a, b);
     parent_work();
     
     if (unlink("pfifofile") < 0)ERR("remove pfifofile:");

@@ -13,7 +13,7 @@ pipefork_stage3: pipefork_stage3.c
 	${CC} ${CFLAGS} -o pipefork_stage3 pipefork_stage3.c
 
 pipefork_stage4: pipefork_stage4.c
-	${CC} ${CFLAGS} -o pipefork_stage3 pipefork_stage3.c
+	${CC} ${CFLAGS} -o pipefork_stage4 pipefork_stage4.c
 
 .PHONY: clean all 
 clean:
