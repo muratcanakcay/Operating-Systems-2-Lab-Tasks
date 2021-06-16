@@ -101,7 +101,6 @@ void parent_work()
 void c_work(int c, int n, int t, int r, int a, int b) 
 {
 	int pfifo, cfifo, msgSize;
-	char buf[PIPE_BUF] = "";
 	srand(getpid()); 
 	
 	printf("c%d starting PID:%d\n", c, getpid());
@@ -163,7 +162,7 @@ void c_work(int c, int n, int t, int r, int a, int b)
 
 void m_work(int c, int n, int t, int r, int a, int b)
 {
-	int cfifo, size;
+	int cfifo;
 	printf("m%d starting PID:%d PPID:%d\n", c, getpid(), getppid());
 
     if (c == 1)
