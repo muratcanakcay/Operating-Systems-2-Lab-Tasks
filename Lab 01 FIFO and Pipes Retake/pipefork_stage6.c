@@ -18,7 +18,7 @@
 #define ERR(source) (fprintf(stderr,"%s:%d\n",__FILE__,__LINE__),\
                      perror(source),kill(0,SIGKILL),\
              exit(EXIT_FAILURE))
-#define DEBUG 0
+#define DEBUG 1
 
 typedef unsigned int UINT;
 typedef struct timespec timespec_t;
@@ -87,8 +87,8 @@ void parent_work()
 {   
     char buf[PIPE_BUF * 2 + 1];
     int pfifo, msgSize, msg, childsLeft = 2;
-	signal(SIGINT, SIG_IGN);
-	//if (sethandler(SIG_IGN, SIGINT)) ERR("Ignoring SIGINT");
+	
+	if (sethandler(SIG_IGN, SIGINT)) ERR("Ignoring SIGINT");
 	
 	msleep(200);
 
@@ -122,8 +122,8 @@ void c_work(int c, int n, int t, int r, int a, int b)
 	srand(getpid()); 
 	
 	printf("c%d starting PID:%d\n", c, getpid());
-	signal(SIGINT, SIG_IGN);
-	//if (sethandler(SIG_IGN, SIGINT)) ERR("Ignoring SIGINT");   
+	
+	if (sethandler(SIG_IGN, SIGINT)) ERR("Ignoring SIGINT");   
 	
     if ((pfifo=open("pfifofile", O_WRONLY))<0) ERR("pfifofile open for c");
 	
@@ -157,7 +157,6 @@ void c_work(int c, int n, int t, int r, int a, int b)
 
         if ((rand() % 100) < r) // double the buffer and fill with X
 		{
-            printf("RANDOMIZING\n");
 			char *temp = malloc(msgSize * 2);
             memcpy(temp, buf, msgSize);
             for (int i = 0; i < msgSize; i++) 
@@ -184,8 +183,8 @@ void m_work(int c, int n, int t, int r, int a, int b)
 {
 	int cfifo;
 	printf("m%d starting PID:%d PPID:%d\n", c, getpid(), getppid());
-	signal(SIGINT, sigint_handler);
-	//if (sethandler(sigint_handler, SIGINT)) ERR("Setting SIGINT handler in m"); // handle SIGINT
+	
+	if (sethandler(sigint_handler, SIGINT)) ERR("Setting SIGINT handler in m"); // handle SIGINT
 
     if (c == 1)
     {
