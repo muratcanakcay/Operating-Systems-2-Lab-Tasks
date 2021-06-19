@@ -1,4 +1,3 @@
-#include <asm-generic/errno-base.h>
 #define _GNU_SOURCE
 #include <unistd.h>
 #include <stdio.h>
@@ -80,13 +79,12 @@ void sigint_handler(int sig)
 {
     printf("Received SIGINT in m\n");
 	sigintReceived=1;
-
 }
 
 void parent_work() 
 {   
     char buf[PIPE_BUF * 2 + 1];
-    int pfifo, msgSize, msg, childsLeft = 2;
+    int pfifo, msgSize, msgNo, childsLeft = 2;
 	
 	if (sethandler(SIG_IGN, SIGINT)) ERR("Ignoring SIGINT");
 	
@@ -107,10 +105,10 @@ void parent_work()
 
         buf[msgSize] = '\0';
 
-        printf("\n[%d]: [%d]: %s\n\n", msg, msgSize, buf);
+        printf("\n[%d]: [%d]: %s\n\n", msgNo, msgSize, buf);
         fflush(stdout);
 
-        ++msg;
+        ++msgNo;
     }
 
     if (close(pfifo)<0) perror("pfifo read end close at parent:");    
@@ -119,15 +117,15 @@ void parent_work()
 void c_work(int c, int n, int t, int r, int a, int b) 
 {
 	int pfifo, cfifo, msgSize;
-	srand(getpid()); 
-	
+	srand(getpid());
 	printf("c%d starting PID:%d\n", c, getpid());
 	
 	if (sethandler(SIG_IGN, SIGINT)) ERR("Ignoring SIGINT");   
 	
     if ((pfifo=open("pfifofile", O_WRONLY))<0) ERR("pfifofile open for c");
 	
-    if (c == 1)
+    // this part can be simplified in a separate function 
+	if (c == 1)
     {
         if ( mkfifo("cfifo1file", S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP) < 0 )
 		    if (errno!=EEXIST) ERR("create cfifo1file");
@@ -151,9 +149,12 @@ void c_work(int c, int n, int t, int r, int a, int b)
 		char* buf;
         if ((buf = (char*)malloc(PIPE_BUF)) == NULL) ERR("malloc");
 
-        msgSize = read(cfifo, buf, PIPE_BUF);
-        if (0 == msgSize) break;
-		if (msgSize < 0) ERR("read byte from cpipe");
+        if ((msgSize = read(cfifo, buf, PIPE_BUF)) <= 0)
+		{
+			free(buf);
+			if (0 == msgSize) break;
+			else ERR("read byte from cpipe");
+		}
 
         if ((rand() % 100) < r) // double the buffer and fill with X
 		{
@@ -167,8 +168,7 @@ void c_work(int c, int n, int t, int r, int a, int b)
 			free(buf);
             buf = temp;
             msgSize *= 2;
-        }
-		
+        }		
 		
 		if (DEBUG) printf("c%d with PID %d transmitting message %s of size %lu to parent\n", c, getpid(), buf, strlen(buf));
         if (TEMP_FAILURE_RETRY(write(pfifo, buf, msgSize)) < 0) ERR("write to pfifo");
@@ -181,7 +181,8 @@ void c_work(int c, int n, int t, int r, int a, int b)
 
 void m_work(int c, int n, int t, int r, int a, int b)
 {
-	int cfifo;
+	int cfifo, msgNo = 0;
+	srand(getpid());
 	printf("m%d starting PID:%d PPID:%d\n", c, getpid(), getppid());
 	
 	if (sethandler(sigint_handler, SIGINT)) ERR("Setting SIGINT handler in m"); // handle SIGINT
@@ -194,18 +195,16 @@ void m_work(int c, int n, int t, int r, int a, int b)
     {
         if ((cfifo=open("cfifo2file", O_WRONLY))<0) ERR("cfifo2 open for m");
     }
-
-	srand(getpid());
-    int i = 0;
-	while(!sigintReceived && i++ < n)
+    
+	while(!sigintReceived && msgNo++ < n)
 	{
 		int size = a + rand() % (b-a+1); // size between a and b
         
         char *buf;
         if ((buf = malloc(size)) == NULL) ERR("malloc");
-        for (int j = 0; j < size; ++j) buf[j] = (rand() % 10) + '0';
+        for (int i = 0; i < size; i++) buf[i] = (rand() % 10) + '0';
 
-        if (DEBUG) printf("[n=%d] m%d with PID %d sending message %s to c with PID %d\n", i, c, getpid(), buf, getppid());
+        if (DEBUG) printf("[n=%d] m%d with PID %d sending message %s to c with PID %d\n", msgNo, c, getpid(), buf, getppid());
         if (TEMP_FAILURE_RETRY(write(cfifo, buf, size) < 0)) ERR("write to cpipe");
 
         free(buf);
@@ -220,7 +219,6 @@ void create_m(int c, int n, int t, int r, int a, int b)
 	switch (fork()) 
 	{
 		case 0:
-			// set signal mask 
 			m_work(c, n, t, r, a, b);
 			
 			printf("m%d exiting PID:%d PPID:%d\n", c, getpid(), getppid());
