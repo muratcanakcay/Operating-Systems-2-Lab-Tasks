@@ -39,7 +39,7 @@ typedef struct threadArgs
 void usage(char * name)
 {
     fprintf(stderr, "USAGE: %s n\n", name);
-    fprintf(stderr, "n: number of nodes [1, 10000]\n");
+    fprintf(stderr, "n: number of nodes [10, 10000]\n");
     exit(EXIT_FAILURE);
 }
 
@@ -64,7 +64,7 @@ void* AllocatorThread(void* voidData)
 	volatile _Atomic(node_t*)* headPtr = ((threadArgs*)voidData)->headPtr;
 	int n = ((threadArgs*)voidData)->n;
 
-	// Allocate nodes
+	// Allocate nodes - array keeps node pointers
 	node_t* nodes[n];
 	for (int i = 0; i < n; i++) 
 	{
@@ -136,7 +136,7 @@ int main(int argc, char** argv)
     
 	if (2 != argc) usage(argv[0]);
 	n = atoi(argv[1]);
-	if (n<1   || n>10000) usage(argv[0]);	
+	if (n<10 || n>10000) usage(argv[0]);	
 	
 	printf("Starting with n=%d...\n", n);
 	
