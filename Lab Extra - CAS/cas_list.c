@@ -19,13 +19,33 @@
              exit(EXIT_FAILURE))
 #define DEBUG 1
 
+void usage(char * name)
+{
+    fprintf(stderr, "USAGE: %s n\n", name);
+    fprintf(stderr, "n: number of nodes [100, 10000]\n");
+    exit(EXIT_FAILURE);
+}
 
 
 int main(int argc, char** argv) 
 {
+	int n; 
+    if (2 != argc) usage(argv[0]);
+    
+	n = atoi(argv[1]);
+	if (n<100   || n>10000) usage(argv[0]);	
+	printf("Starting with n=%d...\n", n);
+	
+    
 	
 	
-    while(wait(NULL) > 0);
-    printf("parent process exiting with PID:%d\n",getpid());
+	
+	
+	
+	
+	
+	
+	while(wait(NULL) > 0);
+    printf("Parent process exiting with PID:%d\n",getpid());
     return EXIT_SUCCESS;
 }
