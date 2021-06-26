@@ -39,7 +39,7 @@ typedef struct threadArgs
 void usage(char * name)
 {
     fprintf(stderr, "USAGE: %s n\n", name);
-    fprintf(stderr, "n: number of nodes [10, 10000]\n");
+    fprintf(stderr, "n: number of nodes [1, 10000]\n");
     exit(EXIT_FAILURE);
 }
 
@@ -79,7 +79,8 @@ void* AllocatorThread(void* voidData)
 
 	
 
-	// Test nodes allocation
+	// Nodes array test
+	printf("Nodes allocated:\n");
 	for (int i = 0; i < n; i++) 
 	{
 		printf("%d ", nodes[i]->value);
@@ -97,23 +98,27 @@ void* AllocatorThread(void* voidData)
 		if (*headPtr == NULL)
 		{ 
 			printf("Head is null \n");
-			headPtr = (volatile _Atomic (node_t*)*)(&nodes[i]);
-			printf("Assigned node to head. Head value is %d\n", (*(node_t**)headPtr)->value);
-			msleep(1000);
+			*headPtr = (volatile _Atomic (node_t)*)(nodes[i]);
+			printf("Assigned node to head. Head value is %d\n", ((node_t*)*headPtr)->value);
+			msleep(100);
 			continue;
 		}
 		
 		do 
 		{
-			nodes[i]->next = *headPtr;
+			nodes[i]->next = (node_t*)*headPtr;
 			printf("Assigned head to next of node with value %d \n", nodes[i]->value);
 			HERE
 
-			printf("head: %p next: %p\n", *headPtr, nodes[i]->next);
-			if (memcmp(*headPtr, nodes[i]->next, sizeof **headPtr) == 0) printf("TRUE\n");
+			printf("head: %p next: %p new: %p\n", *headPtr, nodes[i]->next, nodes[i]);
+			
+			if (memcmp((node_t*)*headPtr, nodes[i]->next, sizeof **headPtr) == 0) printf("TRUE\n");
+			msleep(100);
 			
 		} while (!atomic_compare_exchange_strong(headPtr, &(nodes[i]->next), nodes[i]));
 	}
+
+	HERE
 
 	// Test linked list allocation
 	node_t* current = (node_t*)(*headPtr);
@@ -123,8 +128,6 @@ void* AllocatorThread(void* voidData)
 		current=current->next;
 	}
 	// ----------------------
-
-
 
 	printf("AllocatorThread ending...\n");
 	return NULL;
@@ -137,14 +140,13 @@ void* DeallocatorThread(void* voidData)
 	return NULL;
 }
 
-
 int main(int argc, char** argv) 
 {
 	int n; 
     if (2 != argc) usage(argv[0]);
     
 	n = atoi(argv[1]);
-	if (n<10   || n>10000) usage(argv[0]);	
+	if (n<1   || n>10000) usage(argv[0]);	
 	printf("Starting with n=%d...\n", n);
 	
 	node_t* head = NULL;
@@ -157,11 +159,6 @@ int main(int argc, char** argv)
 	pthread_create(&tid[0], NULL, &AllocatorThread, &tArgs);
 	// Start Deallocator Thread
 	pthread_create(&tid[1], NULL, &DeallocatorThread, &tArgs);
-		
-	
-	
-	
-	
 	
 	
     for (int i = 0; i < 2; i++)
