@@ -32,14 +32,16 @@ typedef struct node_t
 
 typedef struct threadArgs
 {
-	int n;
+	int n, a, d;
 	volatile _Atomic(node_t*)* headPtr;
 } threadArgs;
 
 void usage(char * name)
 {
-    fprintf(stderr, "USAGE: %s n\n", name);
-    fprintf(stderr, "n: number of nodes [10, 10000]\n");
+    fprintf(stderr, "USAGE: %s n a d\n", name);
+    fprintf(stderr, "n: number of nodes [10, 100000]\n");
+	fprintf(stderr, "a: sleep time (ms) between each allocation [0, 2000]\n");
+	fprintf(stderr, "d: sleep time (ms) between each deallocation [0, 2000]\n");
     exit(EXIT_FAILURE);
 }
 
@@ -59,10 +61,11 @@ void msleep(UINT milisec)
 
 void* AllocatorThread(void* voidData)
 {
-	printf("AllocatorThread started...\n");
+	printf("[A]llocatorThread started...\n");
 	
 	volatile _Atomic(node_t*)* headPtr = ((threadArgs*)voidData)->headPtr;
 	int n = ((threadArgs*)voidData)->n;
+	int a = ((threadArgs*)voidData)->a;
 
 	// Allocate nodes - array keeps node pointers
 	node_t* nodes[n];
@@ -75,73 +78,75 @@ void* AllocatorThread(void* voidData)
 		nodes[i] = nodePtr;
 	}
 
-	// Test nodes array
-	printf("Nodes allocated:\n");
-	for (int i = 0; i < n; i++) 
-	{
-		printf("%d ", nodes[i]->value);
-	}
-	printf("\n");
-	// ----------------------
-
 	// Add nodes to front of the list
 	for (int i = 0; i < n; i++)
 	{
-		printf("Adding node with value %d \n", nodes[i]->value);
-		
-		if (*headPtr == NULL)
-		{ 
-			printf("Head is null \n");
-			*headPtr = nodes[i];
-			printf("Assigned new node to head. Head value is %d\n", (*headPtr)->value);
-			msleep(100);
-			continue;
-		}
+		// if (*headPtr == NULL)
+		// { 
+		// 	*headPtr = nodes[i];
+		// 	printf("[A] Assigned new node to head. Head value is %d\n", (*headPtr)->value);
+		// 	msleep(a);
+		// 	continue;
+		// }
 		
 		do 
 		{
-			nodes[i]->next = (node_t*)*headPtr;
-			//printf("head: %p next: %p new: %p\n", *headPtr, nodes[i]->next, nodes[i]);
-			msleep(100);
-			
+			nodes[i]->next = *headPtr;
 		} while (!atomic_compare_exchange_strong(headPtr, &(nodes[i]->next), nodes[i]));
+
+		printf("[A] Added node with value %d \n", nodes[i]->value);
+		msleep(a);
 	}
 
-	// Test linked list
-	printf("Linked List allocated:\n");
-	node_t* current = *headPtr;
-	while(current->next)
-	{
-		printf("%d ", current->value);
-		current=current->next;
-	}
-	// ----------------------
-
-	printf("AllocatorThread ending...\n");
+	printf("[A] AllocatorThread ending...\n");
 	return NULL;
 }
 
 void* DeallocatorThread(void* voidData)
 {
-	printf("DeallocatorThread started...\n");
-	printf("DeallocatorThread ending...\n");	
+	printf("[D]eallocatorThread started...\n");
+
+	node_t* currentHead;
+	volatile _Atomic(node_t*)* headPtr = ((threadArgs*)voidData)->headPtr;
+	int n = ((threadArgs*)voidData)->n;
+	int d = ((threadArgs*)voidData)->d;
+
+	for (int i = 0; i < n; i++)
+	{
+		while (*headPtr == NULL); // wait for new node to be added
+		
+		do 
+		{
+			currentHead = *headPtr;
+		} while (!atomic_compare_exchange_strong(headPtr, &currentHead, currentHead->next));
+
+		printf("[D] Read %d from front.\n", currentHead->value);
+		free(currentHead);
+		msleep(d);
+	}
+
+	printf("[D]eallocatorThread ending...\n");	
 	return NULL;
 }
 
 int main(int argc, char** argv) 
 {
-	int n; 
+	int n, a, d; 
 	pthread_t tid[2];
 	node_t* head = NULL;
     
-	if (2 != argc) usage(argv[0]);
+	if (4 != argc) usage(argv[0]);
 	n = atoi(argv[1]);
-	if (n<10 || n>10000) usage(argv[0]);	
+	a = atoi(argv[2]);
+	d = atoi(argv[3]);
+	if (n<10 || n>100000) usage(argv[0]);
+	if (a<0  || a>2000) usage(argv[0]);
+	if (d<0  || d>2000) usage(argv[0]);
 	
 	printf("Starting with n=%d...\n", n);
 	
 	volatile _Atomic(node_t*)* headPtr = (volatile _Atomic(node_t*)*)&head;
-    threadArgs tArgs = {n, headPtr};
+    threadArgs tArgs = {n, a, d, headPtr};
 
 	pthread_create(&tid[0], NULL, &AllocatorThread, &tArgs);
 	pthread_create(&tid[1], NULL, &DeallocatorThread, &tArgs);
