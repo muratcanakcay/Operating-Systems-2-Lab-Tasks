@@ -19,33 +19,110 @@
                      perror(source),kill(0,SIGKILL),\
              exit(EXIT_FAILURE))
 #define DEBUG 1
+#define HERE puts("**************");
 
-void usage(char * name)
-{
-    fprintf(stderr, "USAGE: %s n\n", name);
-    fprintf(stderr, "n: number of nodes [100, 10000]\n");
-    exit(EXIT_FAILURE);
-}
+typedef unsigned int UINT;
+typedef struct timespec timespec_t;
 
-typedef struct node
+typedef struct node_t
 {
 	int value;
-	struct node* next;
-} node;
+	struct node_t* next;
+} node_t;
 
 typedef struct threadArgs
 {
 	int n;
-	_Atomic volatile node* head;
+	volatile _Atomic(node_t*)* headPtr;
 } threadArgs;
+
+void usage(char * name)
+{
+    fprintf(stderr, "USAGE: %s n\n", name);
+    fprintf(stderr, "n: number of nodes [10, 10000]\n");
+    exit(EXIT_FAILURE);
+}
+
+void msleep(UINT milisec) 
+{
+    time_t sec= (int)(milisec/1000);
+    milisec = milisec - (sec*1000);
+    timespec_t req= {0};
+    req.tv_sec = sec;
+    req.tv_nsec = milisec * 1000000L;
+    if(nanosleep(&req,&req)) 
+	{
+		if (errno == EINTR) return;
+		else ERR("nanosleep");
+	}
+}
 
 void* AllocatorThread(void* voidData)
 {
 	printf("AllocatorThread started...\n");
 	
-	_Atomic volatile node* head = ((threadArgs*)voidData)->head;
+	volatile _Atomic(node_t*)* headPtr = ((threadArgs*)voidData)->headPtr;
 	int n = ((threadArgs*)voidData)->n;
 
+	
+
+	// Allocate nodes
+	node_t* nodes[n];
+	for (int i = 0; i < n; i++) 
+	{
+		node_t* nodePtr = malloc(sizeof(node_t));
+		nodePtr->value = i+1;
+		nodePtr->next = NULL;
+
+		nodes[i] = nodePtr;
+	}
+
+	
+
+	// Test nodes allocation
+	for (int i = 0; i < n; i++) 
+	{
+		printf("%d ", nodes[i]->value);
+	}
+	printf("\n");
+	// ----------------------
+
+	// Add nodes to front of the list
+	for (int i = 0; i < n; i++)
+	{
+		HERE
+		printf("Adding node with value %d \n", nodes[i]->value);
+		HERE
+
+		if (*headPtr == NULL)
+		{ 
+			printf("Head is null \n");
+			headPtr = (volatile _Atomic (node_t*)*)(&nodes[i]);
+			printf("Assigned node to head. Head value is %d\n", (*(node_t**)headPtr)->value);
+			msleep(1000);
+			continue;
+		}
+		
+		do 
+		{
+			nodes[i]->next = *headPtr;
+			printf("Assigned head to next of node with value %d \n", nodes[i]->value);
+			HERE
+
+			printf("head: %p next: %p\n", *headPtr, nodes[i]->next);
+			if (memcmp(*headPtr, nodes[i]->next, sizeof **headPtr) == 0) printf("TRUE\n");
+			
+		} while (!atomic_compare_exchange_strong(headPtr, &(nodes[i]->next), nodes[i]));
+	}
+
+	// Test linked list allocation
+	node_t* current = (node_t*)(*headPtr);
+	while(current->next)
+	{
+		printf("%d ", current->value);
+		current=current->next;
+	}
+	// ----------------------
 
 
 
@@ -56,14 +133,6 @@ void* AllocatorThread(void* voidData)
 void* DeallocatorThread(void* voidData)
 {
 	printf("DeallocatorThread started...\n");
-	
-	_Atomic volatile node* head = ((threadArgs*)voidData)->head;
-	int n = ((threadArgs*)voidData)->n;
-
-
-
-
-
 	printf("DeallocatorThread ending...\n");	
 	return NULL;
 }
@@ -75,10 +144,13 @@ int main(int argc, char** argv)
     if (2 != argc) usage(argv[0]);
     
 	n = atoi(argv[1]);
-	if (n<100   || n>10000) usage(argv[0]);	
+	if (n<10   || n>10000) usage(argv[0]);	
 	printf("Starting with n=%d...\n", n);
 	
-    threadArgs tArgs = {n, NULL};
+	node_t* head = NULL;
+
+	volatile _Atomic(node_t*)* headPtr = (volatile _Atomic(node_t*)*)&head;
+    threadArgs tArgs = {n, headPtr};
 	pthread_t tid[2];
 
 	// Start Allocator Thread
