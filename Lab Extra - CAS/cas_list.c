@@ -14,6 +14,7 @@
 #include <stdbool.h>
 #include <signal.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #define ERR(source) (fprintf(stderr,"%s:%d\n",__FILE__,__LINE__),\
                      perror(source),kill(0,SIGKILL),\
              exit(EXIT_FAILURE))
@@ -26,6 +27,47 @@ void usage(char * name)
     exit(EXIT_FAILURE);
 }
 
+typedef struct node
+{
+	int value;
+	struct node* next;
+} node;
+
+typedef struct threadArgs
+{
+	int n;
+	_Atomic volatile node* head;
+} threadArgs;
+
+void* AllocatorThread(void* voidData)
+{
+	printf("AllocatorThread started...\n");
+	
+	_Atomic volatile node* head = ((threadArgs*)voidData)->head;
+	int n = ((threadArgs*)voidData)->n;
+
+
+
+
+	printf("AllocatorThread ending...\n");
+	return NULL;
+}
+
+void* DeallocatorThread(void* voidData)
+{
+	printf("DeallocatorThread started...\n");
+	
+	_Atomic volatile node* head = ((threadArgs*)voidData)->head;
+	int n = ((threadArgs*)voidData)->n;
+
+
+
+
+
+	printf("DeallocatorThread ending...\n");	
+	return NULL;
+}
+
 
 int main(int argc, char** argv) 
 {
@@ -36,16 +78,23 @@ int main(int argc, char** argv)
 	if (n<100   || n>10000) usage(argv[0]);	
 	printf("Starting with n=%d...\n", n);
 	
-    
+    threadArgs tArgs = {n, NULL};
+	pthread_t tid[2];
+
+	// Start Allocator Thread
+	pthread_create(&tid[0], NULL, &AllocatorThread, &tArgs);
+	// Start Deallocator Thread
+	pthread_create(&tid[1], NULL, &DeallocatorThread, &tArgs);
+		
 	
 	
 	
 	
 	
 	
-	
-	
-	while(wait(NULL) > 0);
-    printf("Parent process exiting with PID:%d\n",getpid());
+    for (int i = 0; i < 2; i++)
+		if (pthread_join(tid[i], NULL) == 0) fprintf(stderr, "Joined with thread %d\n", i+1);
+
+	printf("Main process exiting.\n");
     return EXIT_SUCCESS;
 }
