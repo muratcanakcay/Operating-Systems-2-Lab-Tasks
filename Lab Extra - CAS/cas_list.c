@@ -64,8 +64,6 @@ void* AllocatorThread(void* voidData)
 	volatile _Atomic(node_t*)* headPtr = ((threadArgs*)voidData)->headPtr;
 	int n = ((threadArgs*)voidData)->n;
 
-	
-
 	// Allocate nodes
 	node_t* nodes[n];
 	for (int i = 0; i < n; i++) 
@@ -77,9 +75,7 @@ void* AllocatorThread(void* voidData)
 		nodes[i] = nodePtr;
 	}
 
-	
-
-	// Nodes array test
+	// Test nodes array
 	printf("Nodes allocated:\n");
 	for (int i = 0; i < n; i++) 
 	{
@@ -91,15 +87,13 @@ void* AllocatorThread(void* voidData)
 	// Add nodes to front of the list
 	for (int i = 0; i < n; i++)
 	{
-		HERE
 		printf("Adding node with value %d \n", nodes[i]->value);
-		HERE
-
+		
 		if (*headPtr == NULL)
 		{ 
 			printf("Head is null \n");
-			*headPtr = (volatile _Atomic (node_t)*)(nodes[i]);
-			printf("Assigned node to head. Head value is %d\n", ((node_t*)*headPtr)->value);
+			*headPtr = nodes[i];
+			printf("Assigned new node to head. Head value is %d\n", (*headPtr)->value);
 			msleep(100);
 			continue;
 		}
@@ -107,21 +101,15 @@ void* AllocatorThread(void* voidData)
 		do 
 		{
 			nodes[i]->next = (node_t*)*headPtr;
-			printf("Assigned head to next of node with value %d \n", nodes[i]->value);
-			HERE
-
-			printf("head: %p next: %p new: %p\n", *headPtr, nodes[i]->next, nodes[i]);
-			
-			if (memcmp((node_t*)*headPtr, nodes[i]->next, sizeof **headPtr) == 0) printf("TRUE\n");
+			//printf("head: %p next: %p new: %p\n", *headPtr, nodes[i]->next, nodes[i]);
 			msleep(100);
 			
 		} while (!atomic_compare_exchange_strong(headPtr, &(nodes[i]->next), nodes[i]));
 	}
 
-	HERE
-
-	// Test linked list allocation
-	node_t* current = (node_t*)(*headPtr);
+	// Test linked list
+	printf("Linked List allocated:\n");
+	node_t* current = *headPtr;
 	while(current->next)
 	{
 		printf("%d ", current->value);
@@ -143,26 +131,24 @@ void* DeallocatorThread(void* voidData)
 int main(int argc, char** argv) 
 {
 	int n; 
-    if (2 != argc) usage(argv[0]);
+	pthread_t tid[2];
+	node_t* head = NULL;
     
+	if (2 != argc) usage(argv[0]);
 	n = atoi(argv[1]);
 	if (n<1   || n>10000) usage(argv[0]);	
+	
 	printf("Starting with n=%d...\n", n);
 	
-	node_t* head = NULL;
-
 	volatile _Atomic(node_t*)* headPtr = (volatile _Atomic(node_t*)*)&head;
     threadArgs tArgs = {n, headPtr};
-	pthread_t tid[2];
 
-	// Start Allocator Thread
 	pthread_create(&tid[0], NULL, &AllocatorThread, &tArgs);
-	// Start Deallocator Thread
 	pthread_create(&tid[1], NULL, &DeallocatorThread, &tArgs);
 	
 	
-    for (int i = 0; i < 2; i++)
-		if (pthread_join(tid[i], NULL) == 0) fprintf(stderr, "Joined with thread %d\n", i+1);
+	if (pthread_join(tid[0], NULL) == 0) fprintf(stderr, "Joined with AllocatorThread.\n");
+	if (pthread_join(tid[1], NULL) == 0) fprintf(stderr, "Joined with DeallocatorThread.\n");
 
 	printf("Main process exiting.\n");
     return EXIT_SUCCESS;
