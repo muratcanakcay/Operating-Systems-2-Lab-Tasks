@@ -18,8 +18,8 @@
 #define ERR(source) (fprintf(stderr,"%s:%d\n",__FILE__,__LINE__),\
                      perror(source),kill(0,SIGKILL),\
              exit(EXIT_FAILURE))
+#define HERE puts("******************");
 #define DEBUG 1
-#define HERE puts("**************");
 
 typedef unsigned int UINT;
 typedef struct timespec timespec_t;
@@ -81,20 +81,12 @@ void* AllocatorThread(void* voidData)
 	// Add nodes to front of the list
 	for (int i = 0; i < n; i++)
 	{
-		// if (*headPtr == NULL)
-		// { 
-		// 	*headPtr = nodes[i];
-		// 	printf("[A] Assigned new node to head. Head value is %d\n", (*headPtr)->value);
-		// 	msleep(a);
-		// 	continue;
-		// }
-		
 		do 
 		{
 			nodes[i]->next = *headPtr;
 		} while (!atomic_compare_exchange_strong(headPtr, &(nodes[i]->next), nodes[i]));
 
-		printf("[A] Added node with value %d \n", nodes[i]->value);
+		if (DEBUG) printf("[A] Added node with value %d \n", nodes[i]->value);
 		msleep(a);
 	}
 
@@ -106,11 +98,13 @@ void* DeallocatorThread(void* voidData)
 {
 	printf("[D]eallocatorThread started...\n");
 
+	int oor = 0;
 	node_t* currentHead;
 	volatile _Atomic(node_t*)* headPtr = ((threadArgs*)voidData)->headPtr;
 	int n = ((threadArgs*)voidData)->n;
 	int d = ((threadArgs*)voidData)->d;
 
+	// Remove nodes to front of the list
 	for (int i = 0; i < n; i++)
 	{
 		while (*headPtr == NULL); // wait for new node to be added
@@ -120,11 +114,19 @@ void* DeallocatorThread(void* voidData)
 			currentHead = *headPtr;
 		} while (!atomic_compare_exchange_strong(headPtr, &currentHead, currentHead->next));
 
-		printf("[D] Read %d from front.\n", currentHead->value);
+		printf("[D] Read %d from list.", currentHead->value);
+		if (currentHead->value != i+1) 
+		{
+			printf(" ********* OUT OF ORDER READ\n");
+			oor++;
+		}
+		else printf("\n");
+		
 		free(currentHead);
 		msleep(d);
 	}
 
+	printf("\n[D] Total out of order reads: %d/%d\n\n", oor, n);	
 	printf("[D]eallocatorThread ending...\n");	
 	return NULL;
 }
@@ -143,7 +145,7 @@ int main(int argc, char** argv)
 	if (a<0  || a>2000) usage(argv[0]);
 	if (d<0  || d>2000) usage(argv[0]);
 	
-	printf("Starting with n=%d...\n", n);
+	printf("Starting with n=%d nodes a=%d d=%d...\n", n, a, d);
 	
 	volatile _Atomic(node_t*)* headPtr = (volatile _Atomic(node_t*)*)&head;
     threadArgs tArgs = {n, a, d, headPtr};
