@@ -81,10 +81,10 @@ void* AllocatorThread(void* voidData)
 	// Add nodes to front of the list
 	for (int i = 0; i < n; i++)
 	{
-		do 
-		{
-			nodes[i]->next = *headPtr;
-		} while (!atomic_compare_exchange_strong(headPtr, &(nodes[i]->next), nodes[i]));
+		nodes[i]->next = *headPtr;
+
+		while (!atomic_compare_exchange_strong(headPtr, &(nodes[i]->next), nodes[i]))
+			; // do nothing
 
 		if (DEBUG) printf("[A] Added node with value %d \n", nodes[i]->value);
 		msleep(a);
@@ -107,12 +107,10 @@ void* DeallocatorThread(void* voidData)
 	// Remove nodes to front of the list
 	for (int i = 0; i < n; i++)
 	{
-		while (*headPtr == NULL); // wait for new node to be added
+		while ((currentHead = *headPtr) == NULL); // wait for new node to be added
 		
-		do 
-		{
-			currentHead = *headPtr;
-		} while (!atomic_compare_exchange_strong(headPtr, &currentHead, currentHead->next));
+		while (!atomic_compare_exchange_strong(headPtr, &currentHead, currentHead->next))
+			; // do nothing
 
 		printf("[D] Read %d from list.", currentHead->value);
 		if (currentHead->value != i+1) 
