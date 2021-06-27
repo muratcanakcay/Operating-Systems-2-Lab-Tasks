@@ -1,0 +1,12 @@
+Write a program with two worker threads communicating via lock-free linked list. 
+Thread A preallocates a large amount of nodes. Then inserts all of them one-by-one 
+(with or without a dealay - test it) to front of the list. Thread B also spins in
+a loop trying to extract an element from the front of the list and deallocates it. 
+
+Lock-free means no mutexes, no CV's and other heavy synchronization mechanisms are 
+allowed. Only atomic operations - google for lock-free linked list and 
+atomic compare-and-swap (CAS) operations 
+(https://en.cppreference.com/w/c/atomic/atomic_compare_exchange). 
+
+Correct implementation should always correctly receive all nodes in thread B and
+finish without memory leaks.
