@@ -1,0 +1,20 @@
+Task 2 - UDP
+Goal:
+
+Write client and a server program that communicate over UDP socket. 
+Client task is to send a file divided into proper size datagrams to the server. 
+Server prints out the received data without information about the source.
+
+Each packet send to server must be confirmed with return message. 
+If confirmation is missing (wait 0,5 sec.) resend the packet again. 
+If 5 tries in a row fail, client program exits with an error. 
+Both data packets and confirmations can be lost, program must resolve this issue. 
+Server can not print the same part of the file more than once.
+
+All metadata (everything apart from file content) send over the udp socket 
+must be converted to int32_t type. You can assume that maximum allowed datagram 
+(all data and metadata) size is 576B. Server can handle 5 concurrent transmissions 
+at a time. If sixth client tries to send data it should be ignored.
+
+Server program takes port as its sole parameter, client takes address 
+and port of the server as well as file name as its parameters.

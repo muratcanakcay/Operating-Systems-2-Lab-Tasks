@@ -1,0 +1,68 @@
+TASK on LOCAL+TCP sockets
+Write simple integer calculator server. Data send to server consists of:
+
+- operand 1
+- operand 2
+- result
+- operator (+,-,*,/)
+- status
+all converted to 32 bit integers in an array.
+
+Server calculates the results of operation (+,-,*,/) on operands and sends the 
+result back to the client. If operation is possible status returned is 1, 
+otherwise it should be 0. Server must work with 2 types of connection:
+
+- local stream sockets
+- network tcp sockets
+
+Server is single process application, it takes 2 parameters:
+
+- local socket file name
+- port
+
+Write 2 types of client, one for each connection type, those clients shall take the 
+following parameters:
+
+- address of the host (file name for local connection, domain name for inet)
+- port number (tcp client only)
+- operand 1
+- operand 2
+- operator (+,-,*,/)
+
+On success client displays the result on the screen.
+All above programs can be interrupted with C-c, server may NOT leave local socket file not
+deleted in such a case.
+
+----------------
+
+Stage 1
+Goal:
+1. Server handles local connections
+2. Local connection client
+
+How to run:
+$ ./prog1_s a 2000&
+$ ./prog1_local a 2 1 +
+$ ./prog1_local a 2 1 '*'
+$ ./prog1_local a 2 0 /
+$ killall -s SIGINT prog1_s
+
+
+----------------
+
+Stage 2
+Goal:
+1. Server handles TCP connections
+2. TCP client
+
+How to run:
+$ ./prog2_tcp localhost 2000 234 17  /
+$ ./prog1_local a 2 1 '*'
+$ killall -s SIGINT prog2_s
+
+In pairs check each other host name (it is in command line, eg. p21803), each of you starts 
+the server and then establish a connection with a neighbor:
+$ ./prog2_s a 2000 &
+$ ./prog2_tcp p21804 2000  2 2  +
+...
+$ killall -s SIGINT prog2_s
